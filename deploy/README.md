@@ -8,7 +8,7 @@ repository.
 
 ```bash
 cp deploy/.env.example deploy/.env
-# Set VPS_ID, POSTGRES_PASSWORD, TURN_PUBLIC_HOST and TURN_REALM.
+# Set TURN_PUBLIC_HOST to the public DNS name or IP used by clients.
 ./deploy/init-local-turn.sh
 ```
 
@@ -20,7 +20,10 @@ Git and the Docker build context:
 - `deploy/secrets/ice-subject-id.secret`;
 - `deploy/secrets/turn-local.secret`.
 
-It never replaces an existing secret or ICE configuration.
+The script also generates `VPS_ID` and `POSTGRES_PASSWORD` in `deploy/.env`
+when empty, and defaults `TURN_REALM` to `TURN_PUBLIC_HOST`. Existing values,
+secrets, and ICE configuration are preserved. Keep `deploy/.env` and the secret
+files when updating this installation.
 
 ## Full public stack
 

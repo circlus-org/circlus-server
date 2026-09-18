@@ -7,7 +7,7 @@ env_file="${1:-$script_dir/.env}"
 
 if [ ! -f "$env_file" ]; then
   echo "deployment environment file not found: $env_file" >&2
-  echo "copy deploy/.env.example to deploy/.env and edit it first" >&2
+  echo "copy deploy/.env.example to deploy/.env and set TURN_PUBLIC_HOST first" >&2
   exit 1
 fi
 if ! command -v openssl >/dev/null 2>&1; then
@@ -21,7 +21,7 @@ set -a
 set +a
 
 case "${VPS_ID:-}" in
-  ''|*[!A-Za-z0-9._-]*)
+  *[!A-Za-z0-9._-]*)
     echo "VPS_ID must use only letters, digits, dot, underscore, or hyphen" >&2
     exit 1
     ;;
@@ -32,6 +32,38 @@ case "${TURN_PUBLIC_HOST:-}" in
     exit 1
     ;;
 esac
+
+# Values generated here must remain stable across restarts and upgrades.
+persist_env_value() {
+  key="$1"
+  value="$2"
+  temp_file=$(mktemp "${env_file}.XXXXXX")
+  if ! awk -v key="$key" -v value="$value" '
+    index($0, key "=") == 1 { print key "=" value; found = 1; next }
+    { print }
+    END { if (!found) print key "=" value }
+  ' "$env_file" > "$temp_file"; then
+    rm -f "$temp_file"
+    exit 1
+  fi
+  chmod 600 "$temp_file"
+  mv "$temp_file" "$env_file"
+}
+
+umask 077
+if [ -z "${VPS_ID:-}" ]; then
+  VPS_ID="vps-$(openssl rand -hex 8)"
+  persist_env_value VPS_ID "$VPS_ID"
+fi
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+  POSTGRES_PASSWORD=$(openssl rand -hex 32)
+  persist_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+fi
+if [ -z "${TURN_REALM:-}" ]; then
+  TURN_REALM="$TURN_PUBLIC_HOST"
+  persist_env_value TURN_REALM "$TURN_REALM"
+fi
+chmod 600 "$env_file"
 case "${ICE_CONFIG_KEY_ID:-k1}" in
   *[!A-Za-z0-9._-]*)
     echo "ICE_CONFIG_KEY_ID contains unsupported characters" >&2
@@ -53,7 +85,6 @@ generate_secret_if_missing() {
     fi
     return
   fi
-  umask 077
   openssl rand -base64 32 > "$target"
 }
 

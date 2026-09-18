@@ -37,19 +37,21 @@ physical server is represented separately by `VPS_ID` and server-admin records.
 
 ```bash
 cp deploy/.env.example deploy/.env
-# Set VPS_ID, POSTGRES_PASSWORD, TURN_PUBLIC_HOST and TURN_REALM.
+# Set TURN_PUBLIC_HOST to the public DNS name or IP used by clients.
 ./deploy/init-local-turn.sh
 docker compose --env-file deploy/.env --profile local-turn up -d --build
 ```
 
-Edit `deploy/.env` before starting. At minimum, set strong unique values for:
+Before starting, set the public address clients use for TURN in `deploy/.env`:
 
 ```env
-POSTGRES_PASSWORD=your-secure-password
-VPS_ID=your-stable-server-id
 TURN_PUBLIC_HOST=turn.example.com
-TURN_REALM=turn.example.com
 ```
+
+The initialization script generates a stable random `VPS_ID` and PostgreSQL
+password when those fields are empty. It uses `TURN_PUBLIC_HOST` as `TURN_REALM`
+unless you set a separate realm. Existing values are kept on subsequent runs.
+Keep `deploy/.env` and `deploy/secrets/` across updates and backups.
 
 For Docker Compose, the app containers connect to the bundled PostgreSQL and
 ICE Config Service using internal service names. The initialization script
@@ -210,23 +212,33 @@ mappings in PostgreSQL and uses them to route API and WebSocket requests.
 The Docker or manual setup only starts the empty server. A Circle is created
 afterward from a Circlus client.
 
-1. Make sure the server is reachable over HTTPS and `/ready` works.
-2. Create a one-time server-admin claim token:
+1. Point the chosen first Circle domain at the VPS, configure HTTPS and a
+   reverse proxy for it, and check that `/ready` works. This domain can also
+   be `TURN_PUBLIC_HOST` when TURN uses port 3478.
+2. From the repository root on a Docker Compose installation, create a
+   one-time server-admin claim token:
 
    ```bash
-   cd server
-   npm run server-admin:create-claim -- --ttl-hours=1
+   docker compose --env-file deploy/.env --profile local-turn exec server \
+     npm run server-admin:create-claim:prod -- --ttl-hours=1
    ```
 
-3. Open the official web client: `https://web.circlus.org`.
+   For a manual installation, run
+   `cd server && npm run server-admin:create-claim -- --ttl-hours=1` instead.
 
-4. Go to Server Management and connect the new server using:
+3. Open the official web client: `https://web.circlus.org`. With no existing
+   profile, choose **Create a Circle on your own server** on the start screen.
+   With an existing profile, open **Server Management** and select **Connect a
+   new server**.
+
+4. Enter:
 
    - the HTTPS base URL of your server, for example `https://circle.example.com`;
    - the claim token from the command above.
 
-5. Create the first Circle. The identity that claims the server becomes the
-   initial server administrator and Circle owner.
+5. Create the first Circle. The app registers an owner identity on that Circle;
+   this identity also gains server administrator access. No Circle needs to
+   exist before this step.
 
 For additional Circles on the same server, use Server Management from an
 identity that already has server-admin access. Do not create or share long-lived

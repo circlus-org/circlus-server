@@ -16,6 +16,7 @@
     "migrate:prod": "node dist/server/src/scripts/migrate.js",
     "cleanup:expired-invites": "tsx src/scripts/cleanup-expired-invites.ts",
     "server-admin:create-claim": "tsx src/scripts/create-server-admin-claim.ts",
+    "server-admin:create-claim:prod": "node dist/server/src/scripts/create-server-admin-claim.js",
     "tenant:provision": "tsx src/scripts/provision-tenant.ts",
     "test:reliability": "node scripts/test-signed-operation-reliability.cjs",
     "test:ws-resources": "node scripts/test-ws-resource-guard.cjs",

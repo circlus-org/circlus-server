@@ -98,6 +98,7 @@ jobs:
       - name: Validate Docker Compose and ICE credential issuance
         run: |
           cp deploy/.env.example deploy/.env
+          sed -i 's/^TURN_PUBLIC_HOST=$/TURN_PUBLIC_HOST=turn.test.example/' deploy/.env
           ./deploy/init-local-turn.sh
           docker compose --env-file deploy/.env --profile local-turn config --quiet
           trap 'docker compose --env-file deploy/.env down' EXIT
