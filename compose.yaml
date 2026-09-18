@@ -1,0 +1,139 @@
+name: circlus-server
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: family_messenger
+      POSTGRES_USER: fm_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/config/postgresql-small-server.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fm_user -d family_messenger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [circlus-internal]
+
+  migrate:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://fm_user:${POSTGRES_PASSWORD}@postgres:5432/family_messenger
+      VPS_ID: ${VPS_ID:-home-vps-1}
+    command: ["npm", "run", "migrate:prod"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [circlus-internal]
+
+  ice-config-service:
+    build:
+      context: ./ice_config_service
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3090
+      ICE_CONFIG_PATH: /app/config/turn-clusters.json
+    volumes:
+      - ${ICE_CONFIG_FILE:-./deploy/ice/turn-clusters.json}:/app/config/turn-clusters.json:ro
+      - ${ICE_SECRETS_DIR:-./deploy/secrets}:/run/circlus-secrets:ro
+    ports:
+      - "127.0.0.1:${ICE_CONFIG_HOST_PORT:-3090}:3090"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3090/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [circlus-internal]
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${CIRCLUS_ENV_FILE:-./deploy/.env}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://fm_user:${POSTGRES_PASSWORD}@postgres:5432/family_messenger
+      PORT: 3000
+      ICE_CONFIG_SERVICE_URL: http://ice-config-service:3090
+      ICE_CONFIG_SERVER_ID: ${VPS_ID}
+      ICE_CONFIG_SHARED_SECRET: ""
+      ICE_CONFIG_SHARED_SECRET_FILE: /run/secrets/ice_s2s
+      ICE_SUBJECT_ID_SECRET: ""
+      ICE_SUBJECT_ID_SECRET_FILE: /run/secrets/ice_subject_id
+    secrets:
+      - ice_s2s
+      - ice_subject_id
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    volumes:
+      - server_data:/app/server/server-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      ice-config-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ready >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks: [circlus-internal]
+
+  coturn:
+    image: coturn/coturn:4.15.0-r0
+    profiles: [local-turn]
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_REALM: ${TURN_REALM:-}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_RELAY_MIN_PORT: ${TURN_RELAY_MIN_PORT:-49160}
+      TURN_RELAY_MAX_PORT: ${TURN_RELAY_MAX_PORT:-49200}
+    entrypoint: ["/bin/sh", "/opt/circlus/start-coturn.sh"]
+    volumes:
+      - ./deploy/coturn/turnserver.conf.template:/opt/circlus/turnserver.conf.template:ro
+      - ./deploy/coturn/start-coturn.sh:/opt/circlus/start-coturn.sh:ro
+    secrets:
+      - turn_local
+    healthcheck:
+      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 127.0.0.1 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+secrets:
+  ice_s2s:
+    file: ${ICE_S2S_SECRET_FILE:-./deploy/secrets/ice-s2s.secret}
+  ice_subject_id:
+    file: ${ICE_SUBJECT_ID_SECRET_FILE:-./deploy/secrets/ice-subject-id.secret}
+  turn_local:
+    file: ${TURN_LOCAL_SECRET_FILE:-./deploy/secrets/turn-local.secret}
+
+volumes:
+  postgres_data:
+  server_data:
+
+networks:
+  circlus-internal:
+    driver: bridge

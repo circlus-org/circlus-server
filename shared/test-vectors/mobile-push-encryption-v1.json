@@ -1,0 +1,14 @@
+{
+  "devicePrivateKeyRaw": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "devicePublicKeySpki": "MCowBQYDK2VuAyEAj0DFrbaPJWJK5bIU6nZ6bslNgp09e14a0bpvPiE4KF8=",
+  "plaintext": "{\"type\":\"incoming_call\",\"callSessionId\":\"golden-call-1\",\"sender\":\"Alice\"}",
+  "envelope": {
+    "type": "encrypted",
+    "v": 1,
+    "epk": "MCowBQYDK2VuAyEANYBy1jZYgNGu6jKa35EhODhR7SGijjt16WXQ0s0WYlQ=",
+    "salt": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+    "iv": "YGFiY2RlZmdoaWpr",
+    "tag": "5Xy0H8cnKZQE/8wqLFlu7A==",
+    "ct": "G1LmZim5tPXsj7gubxmMlHImcx3sJwRnM9H/ZI5EJjzjAbYoYF/17DyVnTFjAmGPXmK9XwYtWlOmRxSvZT9Txf016Jl3hsORdA=="
+  }
+}

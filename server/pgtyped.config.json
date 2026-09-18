@@ -1,0 +1,15 @@
+{
+  "transforms": [
+    {
+      "mode": "sql",
+      "include": "**/*.sql",
+      "emitTemplate": "{{dir}}/{{name}}.queries.ts"
+    }
+  ],
+  "srcDir": "./src/",
+  "db": {
+    "dbUrl": "postgresql://postgres:postgres@localhost:5432/family_messenger"
+  },
+  "hungarianNotation": false,
+  "camelCaseColumnNames": false
+}

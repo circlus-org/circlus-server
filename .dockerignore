@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.env
+**/*.log
+**/*.secret
+**/server-data
+deploy/ice/turn-clusters.json
+deploy/secrets/
+ice_config_service/secrets/
+.git
+.gitignore

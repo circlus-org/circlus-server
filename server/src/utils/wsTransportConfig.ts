@@ -1,0 +1,1 @@
+export const DEFAULT_WS_MAX_PAYLOAD_BYTES = 1024 * 1024;

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "defaultTtlSeconds": 3600,
+  "stunUrls": [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302"
+  ],
+  "turnClusters": [
+    {
+      "id": "local",
+      "displayName": "Local TURN",
+      "status": "active",
+      "ownership": "local",
+      "location": "Current VPS",
+      "urls": [
+        "turn:turn.example.com:3478?transport=udp",
+        "turn:turn.example.com:3478?transport=tcp"
+      ],
+      "auth": {
+        "mode": "turn-rest-secret",
+        "secretFile": "./secrets/turn-local.secret",
+        "ttlSeconds": 3600
+      }
+    }
+  ],
+  "authorizedServers": [
+    {
+      "serverId": "home-vps-1",
+      "keyId": "k1",
+      "status": "active",
+      "s2sSharedSecretFile": "./secrets/ice-s2s.secret",
+      "defaultTurnClusterId": "local",
+      "allowedTurnClusterIds": [
+        "local"
+      ]
+    }
+  ]
+}

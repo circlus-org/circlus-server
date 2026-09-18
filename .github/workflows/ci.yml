@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: family_messenger
+          POSTGRES_USER: fm_user
+          POSTGRES_PASSWORD: circlus_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fm_user -d family_messenger"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://fm_user:circlus_ci@127.0.0.1:5432/family_messenger
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            ice_config_service/package-lock.json
+
+      - name: Install ICE Config Service dependencies
+        run: npm ci
+        working-directory: ice_config_service
+
+      - name: Build and test ICE Config Service
+        run: npm run build && npm test && npm audit --omit=dev
+        working-directory: ice_config_service
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Build
+        run: npm run build
+        working-directory: server
+
+      - name: Test
+        run: npm test -- --runInBand
+        working-directory: server
+
+      - name: WebSocket resource and reconnect regressions
+        run: npm run test:ws-resources
+        working-directory: server
+
+      - name: HTTP signaling lost-response regressions
+        run: npm run test:http-signaling
+        working-directory: server
+
+      - name: Lint
+        run: npm run lint
+        working-directory: server
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+        working-directory: server
+
+      - name: PostgreSQL operation replay and concurrency regressions
+        working-directory: server
+        env:
+          RELIABILITY_TEST_DATABASE_URL: postgresql://fm_user:circlus_ci@127.0.0.1:5432/circlus_reliability_test
+        run: |
+          node -e 'const {Client}=require("pg"); (async()=>{const c=new Client({connectionString:process.env.DATABASE_URL}); await c.connect(); await c.query("CREATE DATABASE circlus_reliability_test"); await c.end();})().catch(e=>{console.error(e);process.exitCode=1;});'
+          npm run test:reliability
+
+      - name: PostgreSQL migration and readiness smoke test
+        run: ./scripts/ci-postgres-smoke.sh
+        working-directory: server
+
+      - name: Build runtime container
+        run: docker build --file server/Dockerfile --tag circlus-server-ci .
+
+      - name: Build ICE Config Service container
+        run: docker build --tag circlus-ice-config-service-ci ice_config_service
+
+      - name: Validate Docker Compose and ICE credential issuance
+        run: |
+          cp deploy/.env.example deploy/.env
+          ./deploy/init-local-turn.sh
+          docker compose --env-file deploy/.env --profile local-turn config --quiet
+          trap 'docker compose --env-file deploy/.env down' EXIT
+          docker compose --env-file deploy/.env up -d --build --wait ice-config-service
+          if ! node deploy/smoke-test-ice.mjs; then
+            docker compose --env-file deploy/.env logs ice-config-service
+            exit 1
+          fi
+          if ! ICE_SMOKE_TURN_CLUSTER_ID= node deploy/smoke-test-ice.mjs; then
+            docker compose --env-file deploy/.env logs ice-config-service
+            exit 1
+          fi

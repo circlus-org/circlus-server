@@ -1,0 +1,88 @@
+{
+  "name": "circlus-server",
+  "version": "1.0.0",
+  "description": "Self-hosted Circlus server for private circles, messaging, and WebRTC calls",
+  "main": "dist/server/src/index.js",
+  "scripts": {
+    "types:generate": "./scripts/pgtyped-generate.sh",
+    "types:watch": "./scripts/pgtyped-watch.sh",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/server/src/index.js",
+    "lint": "eslint src --ext .ts",
+    "test": "jest --config jest.config.cjs",
+    "test:watch": "jest --config jest.config.cjs --watch",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "migrate:prod": "node dist/server/src/scripts/migrate.js",
+    "cleanup:expired-invites": "tsx src/scripts/cleanup-expired-invites.ts",
+    "server-admin:create-claim": "tsx src/scripts/create-server-admin-claim.ts",
+    "tenant:provision": "tsx src/scripts/provision-tenant.ts",
+    "test:reliability": "node scripts/test-signed-operation-reliability.cjs",
+    "test:ws-resources": "node scripts/test-ws-resource-guard.cjs",
+    "test:http-signaling": "node scripts/test-http-signaling.cjs"
+  },
+  "keywords": [
+    "circlus",
+    "e2ee",
+    "messenger",
+    "self-hosted",
+    "webrtc",
+    "security"
+  ],
+  "author": "Anton Bormisov (https://github.com/bormisov)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/circlus-org/circlus-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/circlus-org/circlus-server/issues"
+  },
+  "homepage": "https://circlus.org",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=10"
+  },
+  "dependencies": {
+    "@pgtyped/runtime": "^2.4.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "markdown-it": "^14.3.0",
+    "nanoid": "^3.3.7",
+    "pg": "^8.16.3",
+    "sanitize-html": "2.17.7",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "uuid": "^11.1.0",
+    "web-push": "^3.6.7",
+    "ws": "^8.21.1",
+    "htmlparser2": "^10.1.0"
+  },
+  "devDependencies": {
+    "@pgtyped/cli": "^2.4.3",
+    "@swc/core": "^1.15.11",
+    "@swc/jest": "^0.2.39",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.11.5",
+    "@types/pg": "^8.16.0",
+    "@types/sanitize-html": "^2.16.1",
+    "@types/uuid": "^10.0.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^8.56.0",
+    "@typescript-eslint/parser": "^8.56.0",
+    "eslint": "^9.39.2",
+    "jest": "^30.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "postcss": "8.5.25",
+    "test-exclude": "^7.0.1",
+    "qs": "^6.16.0"
+  }
+}

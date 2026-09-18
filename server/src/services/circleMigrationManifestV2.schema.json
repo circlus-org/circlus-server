@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://circlus.app/schemas/circle-migration-manifest-v2.json",
+  "title": "Circlus Circle Migration Manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "migrationFormatVersion",
+    "sourceSchemaFingerprint",
+    "destinationSchemaFingerprint",
+    "dataScopeFingerprint",
+    "migrationId",
+    "migrationSlotId",
+    "familyId",
+    "sourceServerId",
+    "destinationServerId",
+    "sourceCircleId",
+    "destinationCircleId",
+    "sourceServerUrl",
+    "destinationServiceEndpoint",
+    "oldPublicBaseUrl",
+    "targetPublicBaseUrl",
+    "createdAt",
+    "snapshot",
+    "dataScopes",
+    "dataLossPolicy",
+    "configAdjustments",
+    "excludedMessageCountByTargetTtl",
+    "counts",
+    "byteSizes",
+    "tableExports",
+    "checksums",
+    "encryption",
+    "ownerSignedMigrationIntent"
+  ],
+  "properties": {
+    "format": { "const": "circlus-circle-migration-v2" },
+    "migrationFormatVersion": { "const": 2 },
+    "sourceSchemaFingerprint": { "$ref": "#/$defs/fingerprint" },
+    "destinationSchemaFingerprint": { "$ref": "#/$defs/fingerprint" },
+    "dataScopeFingerprint": { "$ref": "#/$defs/fingerprint" },
+    "migrationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "migrationSlotId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "familyId": { "type": "string", "format": "uuid" },
+    "sourceServerId": { "type": "string", "minLength": 1 },
+    "destinationServerId": { "type": "string", "minLength": 1 },
+    "sourceCircleId": { "type": "string", "minLength": 12 },
+    "destinationCircleId": { "type": "string", "minLength": 12 },
+    "sourceServerUrl": { "$ref": "#/$defs/httpsUrl" },
+    "destinationServiceEndpoint": { "$ref": "#/$defs/httpsUrl" },
+    "oldPublicBaseUrl": { "$ref": "#/$defs/httpsUrl" },
+    "targetPublicBaseUrl": { "$ref": "#/$defs/httpsUrl" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "startedAt", "isolation"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "isolation": { "const": "repeatable_read_after_write_freeze" }
+      }
+    },
+    "dataScopes": {
+      "type": "array",
+      "prefixItems": [
+        { "const": "core" },
+        { "const": "direct_guest_links" },
+        { "const": "public_circle_site" }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "dataLossPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dropAttachments", "dropMessageArchive", "dropCallHistory", "dropCallLinks", "dropInvites", "dropSystemEvents"],
+      "properties": {
+        "dropAttachments": { "const": true },
+        "dropMessageArchive": { "const": true },
+        "dropCallHistory": { "const": true },
+        "dropCallLinks": { "const": true },
+        "dropInvites": { "const": true },
+        "dropSystemEvents": { "const": true }
+      }
+    },
+    "configAdjustments": { "type": "object" },
+    "excludedMessageCountByTargetTtl": { "type": "integer", "minimum": 0 },
+    "counts": { "$ref": "#/$defs/nonNegativeIntegerMap" },
+    "byteSizes": { "$ref": "#/$defs/nonNegativeIntegerMap" },
+    "tableExports": {
+      "type": "array",
+      "minItems": 25,
+      "maxItems": 25,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["table", "path", "rowCount", "byteSize", "checksum", "chunkCount"],
+        "properties": {
+          "table": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "pattern": "^db/[a-z0-9_]+\\.jsonl$" },
+          "rowCount": { "type": "integer", "minimum": 0 },
+          "byteSize": { "type": "integer", "minimum": 0 },
+          "checksum": { "$ref": "#/$defs/fingerprint" },
+          "chunkCount": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "checksums": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/fingerprint" }
+    },
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "keyId", "chunkBytes"],
+      "properties": {
+        "algorithm": { "const": "xchacha20-poly1305" },
+        "keyId": { "type": "string", "minLength": 1 },
+        "chunkBytes": { "const": 131072 }
+      }
+    },
+    "ownerSignedMigrationIntent": {
+      "type": "object",
+      "required": ["payload", "signature"],
+      "properties": {
+        "payload": { "type": "object" },
+        "signature": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "httpsUrl": { "type": "string", "pattern": "^https://" },
+    "nonNegativeIntegerMap": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "algorithm": "recursive-lexicographic-object-keys-preserve-array-order",
+  "vectors": [
+    {
+      "input": {
+        "z": 1,
+        "nested": { "b": true, "a": "first" },
+        "list": [{ "d": 4, "c": 3 }]
+      },
+      "canonical": "{\"list\":[{\"c\":3,\"d\":4}],\"nested\":{\"a\":\"first\",\"b\":true},\"z\":1}"
+    },
+    {
+      "input": {
+        "payload": { "target": "https://new.example.com", "enabled": false },
+        "signature": "base64"
+      },
+      "canonical": "{\"payload\":{\"enabled\":false,\"target\":\"https://new.example.com\"},\"signature\":\"base64\"}"
+    }
+  ]
+}
