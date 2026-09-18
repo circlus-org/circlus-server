@@ -32,6 +32,17 @@ case "${TURN_PUBLIC_HOST:-}" in
     exit 1
     ;;
 esac
+turn_listen_port="${TURN_LISTEN_PORT:-3478}"
+case "$turn_listen_port" in
+  ''|*[!0-9]*)
+    echo "TURN_LISTEN_PORT must be an integer from 1 to 65535" >&2
+    exit 1
+    ;;
+esac
+if [ "$turn_listen_port" -lt 1 ] || [ "$turn_listen_port" -gt 65535 ]; then
+  echo "TURN_LISTEN_PORT must be an integer from 1 to 65535" >&2
+  exit 1
+fi
 
 # Values generated here must remain stable across restarts and upgrades.
 persist_env_value() {
@@ -97,6 +108,7 @@ if [ -e "$config_file" ]; then
 else
   sed \
     -e "s/TURN_PUBLIC_HOST/${TURN_PUBLIC_HOST}/g" \
+    -e "s/TURN_LISTEN_PORT/${turn_listen_port}/g" \
     -e "s/\"VPS_ID\"/\"${VPS_ID}\"/g" \
     -e "s/\"ICE_CONFIG_KEY_ID\"/\"${ICE_CONFIG_KEY_ID:-k1}\"/g" \
     "$template_file" > "$config_file"

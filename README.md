@@ -53,6 +53,31 @@ password when those fields are empty. It uses `TURN_PUBLIC_HOST` as `TURN_REALM`
 unless you set a separate realm. Existing values are kept on subsequent runs.
 Keep `deploy/.env` and `deploy/secrets/` across updates and backups.
 
+Before starting Compose, check for occupied host ports:
+
+```bash
+sudo ss -lntup | grep -E ':(80|443|3000|3090|3478)([^0-9]|$)' || true
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+```
+
+The API uses host loopback port `3000` (`PORT` in `deploy/.env`); the ICE
+Config Service uses loopback port `3090` (`ICE_CONFIG_HOST_PORT`). If port
+`3000` is occupied, set `PORT=3100` (or another free port) before starting
+Compose and point the reverse proxy to `127.0.0.1:3100`. The API still uses
+port `3000` inside its container. `ICE_CONFIG_HOST_PORT` can likewise be
+changed when occupied. PostgreSQL is not published on a host port. Existing listeners
+on `80` and `443` may be your reverse proxy; configure a virtual host for the
+Circle domain rather than starting a second proxy on those ports.
+
+Local coturn uses TCP and UDP port `3478`. Set `TURN_LISTEN_PORT` in
+`deploy/.env` **before** running `init-local-turn.sh` to use another free port.
+The script writes that port into the ICE URLs served to clients, so clients
+need no manual port setting. If you change the port after initialization,
+update both `TURN_LISTEN_PORT` and the URLs in
+`deploy/ice/turn-clusters.json`. Open the chosen TCP/UDP port and the
+configured UDP relay range (`49160-49200` by default) in the firewall.
+This local profile does not provide TURN/TLS on port 443.
+
 For Docker Compose, the app containers connect to the bundled PostgreSQL and
 ICE Config Service using internal service names. The initialization script
 creates local S2S/TURN secret files and an ICE cluster configuration without
@@ -80,8 +105,8 @@ After the containers are running:
 1. Put the server behind HTTPS using a reverse proxy.
 2. Check that `https://your-circle-domain.example.com/ready` returns `ok`.
 3. Create a short-lived server-admin claim token.
-4. Open an official Circlus web client and use Server Management to create the
-   first Circle on this server.
+4. Open an official Circlus web client and create the first Circle from its
+   start screen, or from Server Management if you already have a profile.
 
 See [First Circle Provisioning](#first-circle-provisioning) for the full flow.
 

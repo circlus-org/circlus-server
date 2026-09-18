@@ -13,8 +13,8 @@
       "ownership": "local",
       "location": "Current VPS",
       "urls": [
-        "turn:TURN_PUBLIC_HOST:3478?transport=udp",
-        "turn:TURN_PUBLIC_HOST:3478?transport=tcp"
+        "turn:TURN_PUBLIC_HOST:TURN_LISTEN_PORT?transport=udp",
+        "turn:TURN_PUBLIC_HOST:TURN_LISTEN_PORT?transport=tcp"
       ],
       "auth": {
         "mode": "turn-rest-secret",

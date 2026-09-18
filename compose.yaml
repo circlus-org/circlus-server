@@ -106,6 +106,7 @@ services:
     network_mode: host
     environment:
       TURN_REALM: ${TURN_REALM:-}
+      TURN_LISTEN_PORT: ${TURN_LISTEN_PORT:-3478}
       TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
       TURN_RELAY_MIN_PORT: ${TURN_RELAY_MIN_PORT:-49160}
       TURN_RELAY_MAX_PORT: ${TURN_RELAY_MAX_PORT:-49200}
@@ -116,7 +117,7 @@ services:
     secrets:
       - turn_local
     healthcheck:
-      test: ["CMD-SHELL", "turnutils_stunclient -p 3478 127.0.0.1 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "turnutils_stunclient -p ${TURN_LISTEN_PORT:-3478} 127.0.0.1 >/dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 5

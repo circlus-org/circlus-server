@@ -14,6 +14,18 @@ if [ -z "${TURN_REALM:-}" ]; then
   exit 1
 fi
 
+listen_port="${TURN_LISTEN_PORT:-3478}"
+case "$listen_port" in
+  ''|*[!0-9]*)
+    echo "TURN_LISTEN_PORT must be an integer from 1 to 65535" >&2
+    exit 1
+    ;;
+esac
+if [ "$listen_port" -lt 1 ] || [ "$listen_port" -gt 65535 ]; then
+  echo "TURN_LISTEN_PORT must be an integer from 1 to 65535" >&2
+  exit 1
+fi
+
 relay_min_port="${TURN_RELAY_MIN_PORT:-49160}"
 relay_max_port="${TURN_RELAY_MAX_PORT:-49200}"
 case "$relay_min_port:$relay_max_port" in
@@ -29,6 +41,7 @@ fi
 
 cp "$template_file" "$runtime_file"
 {
+  printf 'listening-port=%s\n' "$listen_port"
   printf 'realm=%s\n' "$TURN_REALM"
   printf 'server-name=%s\n' "$TURN_REALM"
   printf 'min-port=%s\n' "$relay_min_port"
