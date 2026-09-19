@@ -30,7 +30,9 @@ describe('Public migration baseline adoption', () => {
     if (fs.existsSync(directory)) {
       const migrations = fs.readdirSync(directory).filter(name => /^\d{3}_.+\.sql$/.test(name)).sort();
       expect(PRE_PUBLIC_BASELINE_COMPLETION_VERSION).toBe('000-pre-public/' + migrations.at(-1));
-      expect(fs.readdirSync(path.dirname(directory)).filter(name => /^\d{3}_.+\.sql$/.test(name))).toEqual([]);
+      expect(fs.readdirSync(path.dirname(directory)).filter(name => /^\d{3}_.+\.sql$/.test(name))).toEqual([
+        '002_managed_push_configuration.sql'
+      ]);
     }
   });
 
@@ -41,4 +43,3 @@ describe('Public migration baseline adoption', () => {
     )).toBe(false);
   });
 });
-

@@ -1,14 +1,16 @@
 import { routeLogger } from '../utils/routeLogger';
 import { Router } from 'express';
+import type { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { nanoid } from 'nanoid';
-import { familyConfigRepository, familyDomainRepository, inviteRepository, serverAdminRepository, tenantOwnerClaimsRepository } from '../db/repositories';
+import { familyConfigRepository, familyDomainRepository, inviteRepository, managedPushConfigurationRepository, serverAdminRepository, tenantOwnerClaimsRepository } from '../db/repositories';
 import { createRateLimiter, ipKey } from '../middleware/rateLimit';
 import { getRequestHost, normalizeHost } from '../middleware/tenancy';
 import { createOpaqueClaimToken, hashClaimToken } from '../utils/claimTokens';
 import { normalizePublicServerUrl } from '../utils/serverIdentity';
 import { validateConfiguredAttachmentMaxFileSize } from '../utils/attachmentConfigValidation';
 import { getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
+import { disableManagedPushConfiguration, installManagedPushConfiguration, preflightManagedPushInstallation, verifyEffectivePushConfiguration } from '../services/managedPushConfigurationService';
 
 const router = Router();
 const hostProvisioningRateLimits = getRateLimitRuntimeConfig().hostProvisioning;
@@ -18,6 +20,83 @@ const rlHostProvisioning = createRateLimiter({
   windowMs: hostProvisioningRateLimits.windowMs,
   max: hostProvisioningRateLimits.max,
   keyFn: ipKey
+});
+const rlPushInstallation = createRateLimiter({
+  name: 'host-provisioning:push-installation',
+  windowMs: 60_000,
+  max: 30,
+  keyFn: ipKey
+});
+
+function pushInstallError(res: Response, error: unknown) {
+  const code = error instanceof Error ? error.message : 'INTERNAL_ERROR';
+  const status = code === 'INSTALL_CLAIM_INVALID' || code === 'INSTALL_CLAIM_EXPIRED' || code === 'INSTALL_AUTH_INVALID' ? 403
+    : code === 'INSTALL_CLAIM_ALREADY_USED' || code === 'INSTALLED_CONFIGURATION_CHANGED' ? 409
+      : code.startsWith('INVALID_') ? 400 : 500;
+  return res.status(status).json({ status: 'error', error: { code, message: code === 'INTERNAL_ERROR' ? 'Push configuration operation failed' : code } });
+}
+
+router.post('/push-configuration/preflight', rlPushInstallation, async (req, res) => {
+  try {
+    const result = await preflightManagedPushInstallation(String(req.body?.claimToken || '').trim());
+    return res.json({ status: 'ok', result });
+  } catch (error) {
+    return pushInstallError(res, error);
+  }
+});
+
+router.post('/push-configuration/install', rlPushInstallation, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const result = await installManagedPushConfiguration({
+      claimToken: String(payload.claimToken || '').trim(),
+      provisionRequestId: String(payload.provisionRequestId || '').trim(),
+      serviceUrl: payload.push?.serviceUrl,
+      clientId: payload.push?.clientId,
+      keyId: payload.push?.keyId,
+      sharedSecret: payload.push?.sharedSecret
+    });
+    let verified = false;
+    try {
+      await verifyEffectivePushConfiguration();
+      verified = true;
+    } catch (error) {
+      routeLogger.warn('Managed push configuration installed but verification failed', error);
+    }
+    return res.json({ status: 'ok', result: { ...result, verified } });
+  } catch (error) {
+    routeLogger.warn('Managed push configuration installation failed', error);
+    return pushInstallError(res, error);
+  }
+});
+
+router.post('/push-configuration/verify', rlPushInstallation, async (req, res) => {
+  try {
+    const claimToken = String(req.body?.claimToken || '').trim();
+    const claim = await managedPushConfigurationRepository.findClaimByTokenHash(hashClaimToken(claimToken));
+    if (!claim || claim.status !== 'consumed') throw new Error('INSTALL_CLAIM_INVALID');
+    await verifyEffectivePushConfiguration();
+    return res.json({ status: 'ok', result: { verified: true } });
+  } catch (error) {
+    return pushInstallError(res, error);
+  }
+});
+
+router.post('/push-configuration/disable', rlPushInstallation, async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const configuration = await disableManagedPushConfiguration({
+      claimToken: String(payload.claimToken || '').trim(),
+      provisionRequestId: String(payload.provisionRequestId || '').trim(),
+      serviceUrl: payload.push?.serviceUrl,
+      clientId: payload.push?.clientId,
+      keyId: payload.push?.keyId,
+      sharedSecret: payload.push?.sharedSecret
+    });
+    return res.json({ status: 'ok', result: { configuration } });
+  } catch (error) {
+    return pushInstallError(res, error);
+  }
 });
 
 function isLocalHttpUrl(url: URL): boolean {

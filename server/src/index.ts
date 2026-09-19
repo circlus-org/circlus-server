@@ -66,6 +66,7 @@ import { createRuntimeHealth } from './utils/runtimeHealth';
 import { requestContextMiddleware, getRequestLogger } from './middleware/requestContext';
 import { requestBodyErrorHandler } from './middleware/requestBodyError';
 import { serverLogger } from './utils/logger';
+import { initializeManagedPushConfiguration } from './services/managedPushConfigurationService';
 
 const logger = serverLogger.child({ component: 'server' });
 const app = express();
@@ -377,6 +378,7 @@ async function startServer() {
     // Connect to PostgreSQL
     initializeDatabase(runtimeConfig.databaseUrl);
     await acquireServerProcessLock();
+    await initializeManagedPushConfiguration();
     logger.info('database_connected');
 
     // Start cleanup scheduler (auto-delete completed calls)

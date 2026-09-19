@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { getIntegrationRuntimeConfig } from '../config/serverRuntimeConfig';
+import type { IntegrationRuntimeConfig } from '../config/integrationRuntimeConfig';
+import { getEffectivePushConfiguration } from '../services/managedPushConfigurationService';
 
 const HEADER_CLIENT_ID = 'X-Push-Client-Id';
 const HEADER_KEY_ID = 'X-Push-Key-Id';
@@ -40,8 +41,9 @@ export function signPushServiceRequest(params: {
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
   body: string;
+  config?: IntegrationRuntimeConfig['push'];
 }): Record<string, string> {
-  const config = getIntegrationRuntimeConfig().push;
+  const config = params.config || getEffectivePushConfiguration();
   const clientId = config.clientId;
   if (!clientId) {
     throw new Error('PUSH_SERVICE_CLIENT_ID is required for push-service S2S auth');

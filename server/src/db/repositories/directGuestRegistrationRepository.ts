@@ -157,7 +157,6 @@ export class DirectGuestRegistrationRepository {
           AND identity.identity_id = registration.guest_identity_id
         WHERE registration.family_id = $1
           AND registration.host_identity_id = $2
-          AND registration.status IN ('active', 'deleted_by_guest')
           AND ($3::text[] IS NULL OR registration.link_id = ANY($3::text[]))
         ORDER BY registration.created_at DESC`,
       [familyId, hostIdentityId, linkIds]
@@ -196,6 +195,55 @@ export class DirectGuestRegistrationRepository {
   ): Promise<DirectGuestRegistrationRecord | null> {
     const results = await findActiveDirectGuestRegistrationByHost.run({ familyId, registrationId, hostIdentityId }, pool);
     return results[0] ? mapDirectGuestRegistration(results[0]) : null;
+  }
+
+  async findByHost(
+    familyId: string,
+    registrationId: string,
+    hostIdentityId: string
+  ): Promise<DirectGuestRegistrationRecord | null> {
+    const result = await pool.query<DirectGuestRegistrationRecord>(
+      `SELECT *
+         FROM direct_guest_registrations
+        WHERE family_id = $1
+          AND registration_id = $2
+          AND host_identity_id = $3
+        LIMIT 1`,
+      [familyId, registrationId, hostIdentityId]
+    );
+    const row = result.rows[0];
+    return row ? { ...row, status: row.status as DirectGuestRegistrationStatus } : null;
+  }
+
+  async deleteInactiveByHost(
+    familyId: string,
+    registrationId: string,
+    hostIdentityId: string
+  ): Promise<DirectGuestRegistrationRecord | null> {
+    const result = await pool.query<DirectGuestRegistrationRecord>(
+      `WITH target AS (
+         SELECT registration_id
+           FROM direct_guest_registrations
+          WHERE family_id = $1
+            AND registration_id = $2
+            AND host_identity_id = $3
+            AND status <> 'active'
+       ),
+       detached_deliveries AS (
+         UPDATE direct_guest_broadcast_deliveries delivery
+            SET registration_id = NULL
+           FROM target
+          WHERE delivery.family_id = $1
+            AND delivery.registration_id = target.registration_id
+       )
+       DELETE FROM direct_guest_registrations registration
+       USING target
+       WHERE registration.registration_id = target.registration_id
+       RETURNING registration.*`,
+      [familyId, registrationId, hostIdentityId]
+    );
+    const row = result.rows[0];
+    return row ? { ...row, status: row.status as DirectGuestRegistrationStatus } : null;
   }
 
   async findActiveByHostForUpdate(

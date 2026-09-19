@@ -102,6 +102,7 @@ generate_secret_if_missing() {
 generate_secret_if_missing "$secrets_dir/ice-s2s.secret"
 generate_secret_if_missing "$secrets_dir/ice-subject-id.secret"
 generate_secret_if_missing "$secrets_dir/turn-local.secret"
+generate_secret_if_missing "$secrets_dir/push-config-encryption.secret"
 
 if [ -e "$config_file" ]; then
   echo "configuration already exists, leaving it unchanged: $config_file"

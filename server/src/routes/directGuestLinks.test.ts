@@ -114,9 +114,11 @@ jest.mock('../db/repositories', () => ({
     listByLink: jest.fn(),
     listByHost: jest.fn(),
     findActiveByHost: jest.fn(),
+    findByHost: jest.fn(),
     findLatestByPair: jest.fn(),
     findActiveByHostForUpdate: jest.fn(),
     revokeByHost: jest.fn(),
+    deleteInactiveByHost: jest.fn(),
     updatePermissionsByHost: jest.fn(),
     selfDelete: jest.fn()
   },
@@ -429,6 +431,57 @@ describe('direct guest link host restrictions', () => {
         code: 'INVALID_STATE',
       }),
     }));
+  });
+
+  test('deletes an inactive guest registration owned by the host', async () => {
+    const repositories = require('../db/repositories');
+    repositories.directGuestRegistrationRepository.findByHost.mockResolvedValue({
+      registration_id: 'reg_1',
+      link_id: 'link_1',
+      status: 'deleted_by_guest',
+    });
+    repositories.directGuestRegistrationRepository.deleteInactiveByHost.mockResolvedValue({
+      registration_id: 'reg_1',
+      link_id: 'link_1',
+      status: 'deleted_by_guest',
+    });
+    const res = makeResponse();
+
+    await getPostHandler('/registrations/:registrationId/delete')({
+      familyId: 'family_1',
+      params: { registrationId: 'reg_1' },
+      identity: { role: 'owner' },
+      device: { identityId: 'host_identity' },
+      signedRequest: { payload: {} },
+    }, res);
+
+    expect(repositories.directGuestRegistrationRepository.deleteInactiveByHost)
+      .toHaveBeenCalledWith('family_1', 'reg_1', 'host_identity');
+    expect(res.json).toHaveBeenCalledWith({
+      status: 'ok',
+      result: { registrationId: 'reg_1', linkId: 'link_1', status: 'deleted' },
+    });
+  });
+
+  test('requires active guest access to be revoked before deleting its record', async () => {
+    const repositories = require('../db/repositories');
+    repositories.directGuestRegistrationRepository.findByHost.mockResolvedValue({
+      registration_id: 'reg_1',
+      link_id: 'link_1',
+      status: 'active',
+    });
+    const res = makeResponse();
+
+    await getPostHandler('/registrations/:registrationId/delete')({
+      familyId: 'family_1',
+      params: { registrationId: 'reg_1' },
+      identity: { role: 'owner' },
+      device: { identityId: 'host_identity' },
+      signedRequest: { payload: {} },
+    }, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(repositories.directGuestRegistrationRepository.deleteInactiveByHost).not.toHaveBeenCalled();
   });
 
   test('allows host to update an active guest registration permissions', async () => {

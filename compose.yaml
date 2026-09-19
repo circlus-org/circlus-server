@@ -76,9 +76,12 @@ services:
       ICE_CONFIG_SHARED_SECRET_FILE: /run/secrets/ice_s2s
       ICE_SUBJECT_ID_SECRET: ""
       ICE_SUBJECT_ID_SECRET_FILE: /run/secrets/ice_subject_id
+      MANAGED_PUSH_CONFIG_ENCRYPTION_KEY: ""
+      MANAGED_PUSH_CONFIG_ENCRYPTION_KEY_FILE: /run/secrets/push_config_encryption
     secrets:
       - ice_s2s
       - ice_subject_id
+      - push_config_encryption
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
@@ -130,6 +133,8 @@ secrets:
     file: ${ICE_SUBJECT_ID_SECRET_FILE:-./deploy/secrets/ice-subject-id.secret}
   turn_local:
     file: ${TURN_LOCAL_SECRET_FILE:-./deploy/secrets/turn-local.secret}
+  push_config_encryption:
+    file: ${PUSH_CONFIG_ENCRYPTION_SECRET_FILE:-./deploy/secrets/push-config-encryption.secret}
 
 volumes:
   postgres_data:

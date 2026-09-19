@@ -146,6 +146,7 @@ describe('large route modules stay decomposed by responsibility', () => {
         '/:linkId/registrations',
         '/registrations/:registrationId/revoke',
         '/registrations/:registrationId/revoke-impact',
+        '/registrations/:registrationId/delete',
         '/registrations/:registrationId/permissions/update',
         '/registrations/self-delete'
       ]

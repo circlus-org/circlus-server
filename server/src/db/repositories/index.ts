@@ -43,3 +43,4 @@ export * from './circleSitePublicationAssetRepository';
 export * from './circleMigrationRepository';
 export * from './quickReceiveControlRepository';
 export * from './trustedDeviceRekeyRepository';
+export * from './managedPushConfigurationRepository';

@@ -23,7 +23,8 @@ import {
   sendMobileNotificationViaCentral,
   sendRelayNotification
 } from './pushDeliveryTransport';
-import { getIntegrationRuntimeConfig, getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getEffectivePushConfiguration } from '../services/managedPushConfigurationService';
 import { getRequestLogger } from '../middleware/requestContext';
 
 export type PushDeliveryMode = 'direct' | 'relay';
@@ -62,15 +63,15 @@ export type PushIdentityDeliveryResult = {
 };
 
 export function isRelayDeliveryEnabled(): boolean {
-  return getIntegrationRuntimeConfig().push.relayDeliveryEnabled;
+  return getEffectivePushConfiguration().relayDeliveryEnabled;
 }
 
 export function getPushServiceUrl(): string | null {
-  return getIntegrationRuntimeConfig().push.serviceUrl;
+  return getEffectivePushConfiguration().serviceUrl;
 }
 
 export function validatePushConfig(): void {
-  const config = getIntegrationRuntimeConfig().push;
+  const config = getEffectivePushConfiguration();
   getRequestLogger({ subsystem: 'push' }).info('push_config_validated', {
     relayDeliveryEnabled: config.relayDeliveryEnabled,
     serviceConfigured: !!config.serviceUrl
@@ -78,7 +79,7 @@ export function validatePushConfig(): void {
 }
 
 export async function getPushVapidKey(): Promise<{ publicKey: string } | null> {
-  const config = getIntegrationRuntimeConfig().push;
+  const config = getEffectivePushConfiguration();
   const relayAvailable = config.relayDeliveryEnabled && !!config.serviceUrl;
   if (!relayAvailable) {
     return null;
@@ -107,7 +108,7 @@ export async function sendPushToDevice(
   resolvedCircleId: string,
   resolvedServerDisplayHint: string
 ): Promise<PushDeviceDeliveryResult> {
-  const pushConfig = getIntegrationRuntimeConfig().push;
+  const pushConfig = getEffectivePushConfiguration();
   const summary: PushDeviceDeliveryResult = {
     deviceId,
     subscriptionsTotal: 0,

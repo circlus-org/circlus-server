@@ -256,6 +256,57 @@ router.post('/registrations/:registrationId/revoke-impact', verifySignature, req
   }
 });
 
+router.post('/registrations/:registrationId/delete', verifySignature, requireActiveIdentity, versionedAccessOperation(async (req: AuthRequest, res) => {
+  try {
+    const familyId = req.familyId;
+    const hostIdentityId = req.device?.identityId;
+    const registrationId = String(req.params.registrationId || '').trim();
+    if (!familyId || !hostIdentityId || !registrationId) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Registration is required' }
+      } as ApiResponse);
+    }
+    if (!(await requireGuestLinkManagementAccess(req, res))) return;
+
+    const existing = await directGuestRegistrationRepository.findByHost(familyId, registrationId, hostIdentityId);
+    if (!existing) {
+      return res.status(404).json({
+        status: 'error',
+        error: { code: 'NOT_FOUND' as ErrorCode, message: 'Direct guest registration not found' }
+      } as ApiResponse);
+    }
+    if (existing.status === 'active') {
+      return res.status(409).json({
+        status: 'error',
+        error: { code: 'INVALID_STATE' as ErrorCode, message: 'Revoke guest access before deleting the record' }
+      } as ApiResponse);
+    }
+
+    const deleted = await directGuestRegistrationRepository.deleteInactiveByHost(
+      familyId,
+      registrationId,
+      hostIdentityId
+    );
+    if (!deleted) {
+      return res.status(409).json({
+        status: 'error',
+        error: { code: 'INVALID_STATE' as ErrorCode, message: 'Guest registration changed; refresh and try again' }
+      } as ApiResponse);
+    }
+    return res.json({
+      status: 'ok',
+      result: { registrationId, linkId: deleted.link_id, status: 'deleted' }
+    } as ApiResponse);
+  } catch (error) {
+    routeLogger.error('Delete direct guest registration error:', error);
+    return res.status(500).json({
+      status: 'error',
+      error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }
+    } as ApiResponse);
+  }
+}));
+
 router.post('/registrations/:registrationId/permissions/update', verifySignature, requireActiveIdentity, versionedAccessOperation(async (req: AuthRequest, res) => {
   try {
     const familyId = req.familyId;

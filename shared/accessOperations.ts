@@ -17,6 +17,7 @@ export const ACCESS_OPERATION_PATHS: Readonly<Record<string, string>> = {
   'admin:user:enable': '/admin/users/:identityId/enable',
   'direct-guest-registrations:permissions:update': '/direct-guest-links/registrations/:registrationId/permissions/update',
   'direct-guest-registrations:revoke': '/direct-guest-links/registrations/:registrationId/revoke',
+  'direct-guest-registrations:delete': '/direct-guest-links/registrations/:registrationId/delete',
   'server-admin:admins:grant': '/server-admin/admins/grant',
   'server-admin:admins:revoke': '/server-admin/admins/:serverAdminId/revoke',
   'server-admin:tenant:suspend': '/server-admin/tenants/:familyId/suspend',

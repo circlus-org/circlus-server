@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { nanoid } from 'nanoid';
 import { verifySignature, requireActiveIdentity, requireServerAdmin, getSignedPayload, type AuthRequest } from '../middleware/auth';
-import { circleOwnerRecoveryRepository, deviceLifecyclePolicyRepository, deviceRepository, familyConfigRepository, familyDomainRepository, identityRepository, inviteRepository, tenantOwnerClaimsRepository, TenantSuspensionError } from '../db/repositories';
+import { circleOwnerRecoveryRepository, deviceLifecyclePolicyRepository, deviceRepository, familyConfigRepository, familyDomainRepository, identityRepository, inviteRepository, managedPushConfigurationRepository, tenantOwnerClaimsRepository, TenantSuspensionError } from '../db/repositories';
 import { configService } from '../services/configService';
 import { attachmentStorageService } from '../services/attachmentStorageService';
 import { publicSiteAssetStorageService } from '../services/publicSiteAssetStorageService';
@@ -28,7 +28,8 @@ import {
 } from '../services/circleOwnershipService';
 import serverAdminAccessRoutes from './serverAdminAccessRoutes';
 import { suspendCircleWsAccess } from '../ws/wsGateway';
-import { getCircleAddressRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getCircleAddressRuntimeConfig, getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getManagedPushConfigurationStatus } from '../services/managedPushConfigurationService';
 
 const router = Router();
 const REVOKED_DELETE_DAYS = 30;
@@ -50,6 +51,29 @@ function daysAgo(days: number): Date {
 }
 
 router.use(serverAdminAccessRoutes);
+
+router.post('/push-configuration/status', verifySignature, requireActiveIdentity, requireServerAdmin,
+  async (_req: AuthRequest, res) => res.json({ status: 'ok', result: getManagedPushConfigurationStatus() }));
+
+router.post('/push-configuration/claims', verifySignature, requireActiveIdentity, requireServerAdmin,
+  async (req: AuthRequest<{ ttlHours?: number }>, res) => {
+    try {
+      const payload = getSignedPayload<{ ttlHours?: number }>(req);
+      const ttlHours = Math.max(1, Math.min(72, Math.floor(Number(payload.ttlHours || 24))));
+      const host = getRequestHost(req);
+      if (!host) return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Request host is required' } });
+      const serverUrl = `${req.secure || req.protocol === 'https' ? 'https' : 'http'}://${host}`;
+      const claimToken = createOpaqueClaimToken('mpc');
+      const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+      const claim = await managedPushConfigurationRepository.createClaim({ tokenHash: hashClaimToken(claimToken), serverUrl, createdByServerAdminId: req.serverAdmin?.serverAdminId || null, expiresAt });
+      const requestPayload = { version: 1, requestId: claim.claim_id, serverUrl, serverId: getServerIdentityRuntimeConfig().vpsId, claimToken, expiresAt: expiresAt.toISOString() };
+      const requestCode = `CIRCLUS-PUSH-REQUEST-V1:${Buffer.from(JSON.stringify(requestPayload), 'utf8').toString('base64url')}`;
+      return res.json({ status: 'ok', result: { ...requestPayload, requestCode } });
+    } catch (error) {
+      routeLogger.error('Create managed push installation claim error:', error);
+      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to create push connection request' } });
+    }
+  });
 
 router.post(
   '/device-lifecycle-policy',

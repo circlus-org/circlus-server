@@ -87,13 +87,16 @@ The official client `https://web.circlus.org` is trusted automatically. To allow
 an additional self-hosted client, configure it explicitly, for example:
 
 ```env
-TRUSTED_CLIENT_ORIGINS=https://ru.circlus.org
+TRUSTED_CLIENT_ORIGINS=https://client.example.com
 ```
 
 This starts PostgreSQL, applies migrations once, starts the Node server and the
 local ICE Config Service, and enables coturn through the `local-turn` profile.
-Omit that profile when all configured TURN clusters are external. Managed push
-credentials are still configured separately.
+Omit that profile when all configured TURN clusters are external. After the
+first Circle exists, its server administrator can request the standard Circlus
+push connection from **Settings → Server Management**. The approval service
+installs and verifies the credentials directly; the VPS owner does not copy a
+secret into `.env`.
 
 The bundled PostgreSQL configuration is intended for a small VPS. The default
 values are a good starting point for a 2 GB RAM server with light traffic. On a
@@ -109,6 +112,29 @@ After the containers are running:
    start screen, or from Server Management if you already have a profile.
 
 See [First Circle Provisioning](#first-circle-provisioning) for the full flow.
+
+### Connect push notifications
+
+Complete this after the first Circle and server administrator access exist:
+
+1. In the official client, open **Settings → Server Management** and select
+   this server.
+2. In **Push notifications**, select **Create connection request**. The code is
+   valid for 24 hours and can be used only for this server.
+3. Select **Open support contact**. If this is your first visit, complete the
+   guest registration. The generated request is already placed in the visible
+   message field; review it and send it.
+4. Wait for approval in the same Circlus conversation. The maintainer can ask
+   questions there. On approval, the provisioning service registers the server,
+   sends the credentials directly to it, and verifies authentication.
+5. Return to Server Management and refresh the push status. It should show
+   **Connected and ready**.
+
+The conversation contains only a short-lived installation claim. The permanent
+push secret is generated after approval and is never sent through chat. The
+server encrypts that secret with `deploy/secrets/push-config-encryption.secret`;
+back up this file together with the database and the other files in
+`deploy/secrets/`.
 
 ## Manual Setup
 
@@ -146,7 +172,10 @@ Important settings:
 - `TRUST_PROXY=1`: recommended when running behind one trusted reverse proxy.
 - `TRUSTED_CLIENT_ORIGINS`: additional custom web client origins allowed by CORS;
   `https://web.circlus.org` is always trusted.
-- `PUSH_SERVICE_*`: server-to-server authentication for push delivery.
+- `PUSH_SERVICE_*`: optional legacy server-to-server authentication for push
+  delivery. A managed configuration installed from Server Management is stored
+  encrypted in PostgreSQL and takes precedence. Environment variables remain a
+  compatibility fallback only while no managed configuration row exists.
 - `ICE_CONFIG_*`: server-to-server authentication for TURN/ICE configuration.
 - `CALL_SIGNALING_DIAGNOSTICS=false`: keep disabled in production unless debugging calls.
 - `CALL_ICE_DIAGNOSTICS=false`: keep disabled in production unless debugging WebRTC connectivity.
@@ -286,7 +315,8 @@ afterward from a Circlus client.
    one-time server-admin claim token:
 
    ```bash
-   docker compose --env-file deploy/.env --profile local-turn exec server \
+   docker compose --env-file deploy/.env --profile local-turn exec \
+     -e LOG_LEVEL=warn server \
      npm run server-admin:create-claim:prod -- --ttl-hours=1
    ```
 
@@ -294,10 +324,30 @@ afterward from a Circlus client.
    `cd server && npm run server-admin:create-claim -- --ttl-hours=1` instead.
 
 3. Open either the official web client at `https://web.circlus.org` or the
-   Circlus Android app. Both use the same first-Circle flow. With no existing
-   profile, choose **Create a Circle on your own server** on the start screen.
-   With an existing profile, open **Server Management** and select **Connect a
-   new server**.
+   [Circlus Android app on Google Play](https://play.google.com/store/apps/details?id=org.circlus.client).
+   While Google Play testing is closed, [ask the project maintainer](https://circlus.org/#contact)
+   to add your Google account to the tester list before downloading the app.
+   The listing is visible only to admitted tester accounts; the official APK is also available from
+   [Circlus Android Releases](https://github.com/circlus-org/circlus-android-releases/releases).
+   Both clients use the same first-Circle flow. With no existing profile,
+   choose **Create a Circle on your own server** on the start screen. With an
+   existing profile, open the **Settings** tab in the Circlus app, choose
+   **Server Management**, open the **Server** drop-down list, and select
+   **Connect a new server**.
+
+   `https://web.circlus.org` is allowed by the server automatically. Before
+   using another web client, add its exact origin to `deploy/.env` (multiple
+   origins are comma-separated) and recreate the server container so it reads
+   the updated environment:
+
+   ```env
+   TRUSTED_CLIENT_ORIGINS=https://client.example.com
+   ```
+
+   ```bash
+   docker compose --env-file deploy/.env --profile local-turn up -d \
+     --force-recreate server
+   ```
 
 4. Enter:
 
@@ -314,9 +364,9 @@ host access secrets for routine Circle creation.
 
 ## Database Migrations
 
-The public server repository starts from a single initial schema baseline in
-`server/db/migrations/001_initial_schema.sql`. Future schema changes should be
-added as new numbered migrations in the same directory, starting with `002_...`.
+The public server repository starts from an initial schema baseline in
+`server/db/migrations/001_initial_schema.sql`. Schema changes are added as
+forward-only numbered migrations in the same directory.
 Migrations are applied with `npm run migrate` and tracked in the database via
 `schema_migrations`.
 
@@ -354,10 +404,13 @@ For Docker Compose deployments:
 
 ```bash
 git pull
+./deploy/init-local-turn.sh
 docker compose --env-file deploy/.env --profile local-turn up -d --build
 ```
 
-Run these commands from the repository root. Omit `--profile local-turn` if
+Run these commands from the repository root. The initialization command keeps
+existing values and secrets and creates any secret file introduced by the new
+version. Omit `--profile local-turn` from Compose if
 your configured TURN clusters are external. Use the same Compose project name
 as the original installation so its named data volumes remain attached. The
 Compose setup runs migrations before starting the updated server process.
@@ -393,6 +446,8 @@ adding, removing, disabling, or changing a client-visible server capability.
 At minimum, back up:
 
 - PostgreSQL data;
+- `deploy/secrets/`, including `push-config-encryption.secret` needed to decrypt
+  managed push credentials;
 - the Docker `server_data` volume, which contains encrypted attachments, public
   site assets, generated sites, and local Circle migration packages;
 - the server `.env`;
