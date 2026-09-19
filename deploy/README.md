@@ -36,8 +36,8 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 
 The API and ICE Config Service bind only to host loopback, using `PORT=3000`
 and `ICE_CONFIG_HOST_PORT=3090` by default. Change those values in
-`deploy/.env` if occupied. For example, set `PORT=3100` and point Nginx or
-Caddy at `127.0.0.1:3100`. The container's API port remains `3000`. Use
+`deploy/.env` if occupied. For example, set `PORT=3100` and point Nginx at
+`127.0.0.1:3100`. The container's API port remains `3000`. Use
 `ICE_CONFIG_HOST_PORT` in any host-side ICE service or smoke-test
 URL. PostgreSQL has no host port. Ports 80 and 443 may already belong to an
 existing reverse proxy; add a virtual host for the Circle domain there.
@@ -49,6 +49,11 @@ separate client setting. After initialization, changing the port also requires
 updating both TURN URLs in `deploy/ice/turn-clusters.json`. Open the chosen
 TCP/UDP port and relay UDP range in the firewall. Port 443 is not a plain
 TURN/TLS option in this profile; it requires separate TLS and proxy setup.
+
+For the complete beginner sequence—HTTP Nginx configuration, public readiness
+check, Certbot certificate issuance, HTTPS verification, and renewal test—see
+`HTTPS with Nginx and Certbot` in the repository root `README.md`. Do not run
+Certbot until the public HTTP readiness check succeeds.
 
 ## Full public stack
 

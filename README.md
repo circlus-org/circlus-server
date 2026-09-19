@@ -31,7 +31,7 @@ physical server is represented separately by `VPS_ID` and server-admin records.
 
 - Docker and Docker Compose for the recommended setup
 - Node.js 24 LTS, PostgreSQL 15+, and npm for manual setup or development
-- A reverse proxy such as Nginx, Caddy, Apache, or a managed equivalent for production TLS
+- Nginx and Certbot for the documented Ubuntu/Debian HTTPS setup
 
 ## Quick Start
 
@@ -102,7 +102,7 @@ to `512MB` in `server/config/postgresql-small-server.conf`.
 
 After the containers are running:
 
-1. Put the server behind HTTPS using a reverse proxy.
+1. Follow [HTTPS with Nginx and Certbot](#https-with-nginx-and-certbot).
 2. Check that `https://your-circle-domain.example.com/ready` returns `ok`.
 3. Create a short-lived server-admin claim token.
 4. Open an official Circlus web client and create the first Circle from its
@@ -195,36 +195,75 @@ credentials cannot be issued and calls may fail on restrictive networks.
 See `deploy/README.md` for running only ICE Config Service and coturn next to an
 existing PM2-managed Circlus Server.
 
-## Reverse Proxy Notes
+## HTTPS with Nginx and Certbot
 
-The server resolves circles from the incoming `Host` header. Your reverse proxy must preserve the original host.
+This is the supported beginner path for an Ubuntu or Debian VPS. It assumes
+that the chosen domain already has an `A` record pointing to the VPS and that
+TCP ports 80 and 443 are allowed by the hosting firewall. The same domain may
+also be `TURN_PUBLIC_HOST`; HTTPS uses ports 80/443 while local TURN uses 3478.
 
-Caddy example:
+Install Nginx, Certbot, and its Nginx plugin:
 
-```caddyfile
-circle.example.com {
-  reverse_proxy 127.0.0.1:3000 {
-    header_up Host {host}
-    header_up X-Forwarded-For {remote_host}
-    header_up X-Forwarded-Proto {scheme}
-  }
-}
+```bash
+sudo apt update
+sudo apt install nginx certbot python3-certbot-nginx
 ```
 
-Nginx example:
+Create the HTTP site before asking Certbot for a certificate:
 
-```nginx
-proxy_set_header Host $host;
-proxy_set_header X-Forwarded-For $remote_addr;
-proxy_set_header X-Forwarded-Proto $scheme;
+```bash
+sudo cp deploy/nginx/circlus-server.conf.example \
+  /etc/nginx/sites-available/circlus-server
+sudo nano /etc/nginx/sites-available/circlus-server
 ```
 
-The bundled Compose file binds the API port to `127.0.0.1` for a reverse proxy on the host. For a containerized proxy, connect it to the internal network and do not publish the API port to the internet.
+Replace `circle.example.com` with the Circle domain. If `PORT` in
+`deploy/.env` is not `3000`, replace `127.0.0.1:3000` with the selected port.
+Then enable and reload the site:
 
-Use `TRUST_PROXY=1` when the server is reachable only through that trusted proxy. Avoid trusting arbitrary forwarded headers from the public internet.
+```bash
+sudo ln -sfn /etc/nginx/sites-available/circlus-server \
+  /etc/nginx/sites-enabled/circlus-server
+sudo nginx -t
+sudo systemctl reload nginx
+```
 
-For a typical VPS, expose only SSH, HTTP, and HTTPS publicly. Do not expose
-PostgreSQL to the public internet.
+Give Nginx time to replace its workers, then verify the public HTTP route in a
+separate step:
+
+```bash
+sleep 2
+curl --fail --show-error http://circle.example.com/ready
+```
+
+Continue only when this returns JSON with `"status":"ok"`. A 404 usually
+means that Nginx is still serving another/default site or that `server_name`
+does not exactly match the domain. A connection failure usually means that
+DNS, port 80, or a hosting firewall is not ready.
+
+Now request the certificate and let Certbot add HTTPS and the HTTP redirect:
+
+```bash
+sudo certbot --nginx --redirect -d circle.example.com
+```
+
+Enter an email address and accept the Let's Encrypt terms when prompted. Then
+verify HTTPS and automatic renewal:
+
+```bash
+sleep 2
+curl --fail --show-error https://circle.example.com/ready
+sudo certbot renew --dry-run
+```
+
+Both readiness requests must return JSON with `"status":"ok"`. Certbot's
+Nginx flow requires the HTTP site to be publicly reachable on port 80 before
+certificate issuance. See the official [Certbot instructions](https://certbot.eff.org/instructions).
+
+The example preserves the original `Host`, overwrites forwarded client headers,
+and supports WebSocket upgrades. Keep `TRUST_PROXY=1` when the API is reachable
+only through this Nginx instance. The bundled Compose file exposes the API only
+on host loopback. PostgreSQL is not published on a host port.
 
 ## Circles
 
@@ -237,9 +276,10 @@ mappings in PostgreSQL and uses them to route API and WebSocket requests.
 The Docker or manual setup only starts the empty server. A Circle is created
 afterward from a Circlus client.
 
-1. Point the chosen first Circle domain at the VPS, configure HTTPS and a
-   reverse proxy for it, and check that `/ready` works. This domain can also
-   be `TURN_PUBLIC_HOST` when TURN uses port 3478.
+1. Point the chosen first Circle domain at the VPS, complete
+   [HTTPS with Nginx and Certbot](#https-with-nginx-and-certbot), and check that
+   its HTTPS `/ready` endpoint works. This domain can also be
+   `TURN_PUBLIC_HOST` when TURN uses port 3478.
 2. From the repository root on a Docker Compose installation, create a
    one-time server-admin claim token:
 
