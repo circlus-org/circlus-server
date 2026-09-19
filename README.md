@@ -253,12 +253,14 @@ verify HTTPS and automatic renewal:
 ```bash
 sleep 2
 curl --fail --show-error https://circle.example.com/ready
-sudo certbot renew --dry-run
+sudo certbot renew --cert-name circle.example.com --dry-run
 ```
 
 Both readiness requests must return JSON with `"status":"ok"`. Certbot's
 Nginx flow requires the HTTP site to be publicly reachable on port 80 before
-certificate issuance. See the official [Certbot instructions](https://certbot.eff.org/instructions).
+certificate issuance. `--cert-name` limits this installation check to the new
+certificate; Certbot's scheduled renewal still handles every managed
+certificate. See the official [Certbot instructions](https://certbot.eff.org/instructions).
 
 The example preserves the original `Host`, overwrites forwarded client headers,
 and supports WebSocket upgrades. Keep `TRUST_PROXY=1` when the API is reachable
