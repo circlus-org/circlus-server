@@ -293,7 +293,8 @@ afterward from a Circlus client.
    For a manual installation, run
    `cd server && npm run server-admin:create-claim -- --ttl-hours=1` instead.
 
-3. Open the official web client: `https://web.circlus.org`. With no existing
+3. Open either the official web client at `https://web.circlus.org` or the
+   Circlus Android app. Both use the same first-Circle flow. With no existing
    profile, choose **Create a Circle on your own server** on the start screen.
    With an existing profile, open **Server Management** and select **Connect a
    new server**.
