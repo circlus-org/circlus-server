@@ -100,6 +100,7 @@ jobs:
           cp deploy/.env.example deploy/.env
           sed -i 's/^TURN_PUBLIC_HOST=$/TURN_PUBLIC_HOST=turn.test.example/' deploy/.env
           ./deploy/init-local-turn.sh
+          grep -Eq '^MOBILE_CALL_ACTION_SECRET=.{32,}$' deploy/.env
           docker compose --env-file deploy/.env --profile local-turn config --quiet
           trap 'docker compose --env-file deploy/.env down' EXIT
           docker compose --env-file deploy/.env up -d --build --wait ice-config-service

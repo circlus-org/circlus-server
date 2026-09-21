@@ -70,15 +70,23 @@ function fingerprint(input: ReturnType<typeof normalizeInstallInput>): string {
   return crypto.createHash('sha256').update(JSON.stringify(input), 'utf8').digest('hex');
 }
 
+function requireMobileCallActionSecret(): void {
+  if (!getIntegrationRuntimeConfig().mobileCalls.actionSecret) {
+    throw new Error('MOBILE_CALL_ACTION_SECRET_NOT_CONFIGURED');
+  }
+}
+
 export async function preflightManagedPushInstallation(claimToken: string) {
   const claim = await managedPushConfigurationRepository.findClaimByTokenHash(hashClaimToken(claimToken));
   if (!claim) throw new Error('INSTALL_CLAIM_INVALID');
   if (claim.status !== 'pending') throw new Error(claim.status === 'consumed' ? 'INSTALL_CLAIM_ALREADY_USED' : 'INSTALL_CLAIM_INVALID');
   if (claim.expires_at.getTime() <= Date.now()) throw new Error('INSTALL_CLAIM_EXPIRED');
+  requireMobileCallActionSecret();
   return { claimId: claim.claim_id, serverUrl: claim.server_url, expiresAt: claim.expires_at.toISOString() };
 }
 
 export async function installManagedPushConfiguration(params: { claimToken: string; provisionRequestId: string; serviceUrl: unknown; clientId: unknown; keyId: unknown; sharedSecret: unknown }) {
+  requireMobileCallActionSecret();
   const normalized = normalizeInstallInput(params);
   const result = await managedPushConfigurationRepository.install({
     tokenHash: hashClaimToken(params.claimToken), provisionRequestId: params.provisionRequestId,
@@ -106,6 +114,7 @@ export function getManagedPushConfigurationStatus() {
 }
 
 export async function verifyEffectivePushConfiguration(): Promise<{ ok: true }> {
+  requireMobileCallActionSecret();
   const config = getEffectivePushConfiguration();
   if (!config.serviceUrl || !config.clientId || !config.sharedSecretBase64) throw new Error('PUSH_NOT_CONFIGURED');
   const path = '/api/push/auth/check';

@@ -70,6 +70,10 @@ if [ -z "${POSTGRES_PASSWORD:-}" ]; then
   POSTGRES_PASSWORD=$(openssl rand -hex 32)
   persist_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
 fi
+if [ -z "${MOBILE_CALL_ACTION_SECRET:-}" ]; then
+  MOBILE_CALL_ACTION_SECRET=$(openssl rand -hex 32)
+  persist_env_value MOBILE_CALL_ACTION_SECRET "$MOBILE_CALL_ACTION_SECRET"
+fi
 if [ -z "${TURN_REALM:-}" ]; then
   TURN_REALM="$TURN_PUBLIC_HOST"
   persist_env_value TURN_REALM "$TURN_REALM"

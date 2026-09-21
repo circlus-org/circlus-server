@@ -18,12 +18,15 @@ Git and the Docker build context:
 - `deploy/ice/turn-clusters.json`;
 - `deploy/secrets/ice-s2s.secret`;
 - `deploy/secrets/ice-subject-id.secret`;
-- `deploy/secrets/turn-local.secret`.
+- `deploy/secrets/turn-local.secret`;
+- `deploy/secrets/push-config-encryption.secret`.
 
-The script also generates `VPS_ID` and `POSTGRES_PASSWORD` in `deploy/.env`
-when empty, and defaults `TURN_REALM` to `TURN_PUBLIC_HOST`. Existing values,
-secrets, and ICE configuration are preserved. Keep `deploy/.env` and the secret
-files when updating this installation.
+The script also generates `VPS_ID`, `POSTGRES_PASSWORD`, and
+`MOBILE_CALL_ACTION_SECRET` in `deploy/.env` when empty, and defaults
+`TURN_REALM` to `TURN_PUBLIC_HOST`. The call-action secret signs short-lived
+native incoming-call actions and bootstrap tokens. Existing values, secrets,
+and ICE configuration are preserved. Keep `deploy/.env` and the secret files
+when updating this installation.
 
 ## Host ports
 
