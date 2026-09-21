@@ -50,6 +50,12 @@ export function ipFamilyKey(req: Request): string {
   return `${ipKey(req)}|family:${normalizeKeyPart(familyId)}`;
 }
 
+export function deviceFamilyKey(req: Request): string {
+  const familyId = (req as TenancyRequest).familyId || 'unknown-family';
+  const deviceId = (req as Request & { device?: { deviceId?: string } }).device?.deviceId || 'unknown-device';
+  return `device:${normalizeKeyPart(deviceId)}|family:${normalizeKeyPart(familyId)}`;
+}
+
 export function createRateLimiter(options: RateLimiterOptions) {
   const buckets = new Map<string, Bucket>();
   let tick = 0;

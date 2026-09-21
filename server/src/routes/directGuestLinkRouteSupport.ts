@@ -17,6 +17,7 @@ export function mapDirectGuestRegistrationResponse(
     guestIdentityPublicKey: row.guest_public_key_algorithm && row.guest_public_key_value
       ? { algorithm: row.guest_public_key_algorithm, value: row.guest_public_key_value }
       : null,
+    canCreateGuestInvites: row.guest_can_create_guest_invites === true,
     capabilityId: row.capability_id ?? null,
     admissionClaim: row.admission_claim ?? null,
     departure: row.departure_proof ?? null,

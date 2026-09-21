@@ -9,11 +9,6 @@ describe('group chat membership route boundary', () => {
     }).stack.flatMap((layer) => layer.route?.path ? [layer.route.path] : []);
 
     expect(paths).toEqual([
-      '/:chatId/participants\\:add',
-      '/:chatId/participants\\:remove',
-      '/:chatId/owner\\:transfer',
-      '/:chatId/leave-check',
-      '/:chatId/leave',
       '/:chatId/participants/list'
     ]);
   });

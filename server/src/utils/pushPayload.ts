@@ -52,7 +52,7 @@ export interface PushPayload {
   nonce?: string;
   ownershipChangeId?: string;
   circleName?: string;
-  ownerChangeMethod?: 'voluntary_transfer' | 'server_admin_recovery';
+  ownerChangeMethod?: 'voluntary_transfer';
 }
 
 export type PushDeliveryUrgency = 'normal' | 'high';

@@ -13,10 +13,6 @@ export interface FindByTokenParams {
 
 /** 'FindByToken' return type */
 export interface FindByTokenResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -33,7 +29,6 @@ export interface FindByTokenResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -65,10 +60,6 @@ export interface FindByIdParams {
 
 /** 'FindById' return type */
 export interface FindByIdResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -85,7 +76,6 @@ export interface FindByIdResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -121,10 +111,6 @@ export interface CreateInviteParams {
 
 /** 'CreateInvite' return type */
 export interface CreateInviteResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -141,7 +127,6 @@ export interface CreateInviteResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -215,10 +200,6 @@ export interface UpdateInviteStatusParams {
 
 /** 'UpdateInviteStatus' return type */
 export interface UpdateInviteStatusResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -235,7 +216,6 @@ export interface UpdateInviteStatusResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -268,10 +248,6 @@ export interface FindActiveInvitesParams {
 
 /** 'FindActiveInvites' return type */
 export interface FindActiveInvitesResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -288,7 +264,6 @@ export interface FindActiveInvitesResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -320,10 +295,6 @@ export interface FindAllInvitesParams {
 
 /** 'FindAllInvites' return type */
 export interface FindAllInvitesResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -340,7 +311,6 @@ export interface FindAllInvitesResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }
@@ -372,10 +342,6 @@ export interface FindByCreatorParams {
 
 /** 'FindByCreator' return type */
 export interface FindByCreatorResult {
-  accepted_at: Date | null;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   capability_descriptor: Json | null;
   capability_id: string | null;
   capability_mode: string | null;
@@ -392,7 +358,6 @@ export interface FindByCreatorResult {
   invite_id: string;
   max_uses: number;
   status: string;
-  title: string | null;
   token: string;
   used_count: number;
 }

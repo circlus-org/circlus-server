@@ -1,12 +1,9 @@
 type StoredExternalCaller = {
   admissionKind?: unknown;
-  callLinkTitle?: unknown;
   capabilityGrant?: {
     descriptor?: {
       payload?: {
-        scope?: {
-          title?: unknown;
-        };
+        scope?: Record<string, unknown>;
       };
     };
   };
@@ -17,11 +14,6 @@ export type CallLinkPresentation = {
   callLinkTitle?: string;
 };
 
-function cleanCallLinkTitle(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  return value.trim().slice(0, 120) || undefined;
-}
-
 export function resolveCallLinkPresentation(
   callSession: { sdp_offer?: string | null } | null | undefined
 ): CallLinkPresentation {
@@ -31,11 +23,7 @@ export function resolveCallLinkPresentation(
     if (externalCaller?.admissionKind !== 'call_link') {
       return { isTemporaryLinkCall: false };
     }
-    return {
-      isTemporaryLinkCall: true,
-      callLinkTitle: cleanCallLinkTitle(externalCaller.callLinkTitle)
-        || cleanCallLinkTitle(externalCaller.capabilityGrant?.descriptor?.payload?.scope?.title)
-    };
+    return { isTemporaryLinkCall: true };
   } catch {
     return { isTemporaryLinkCall: false };
   }

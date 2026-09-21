@@ -223,8 +223,9 @@ export function registerInspectorReadRoutes(router: Router): void {
     try {
       const result = await query(
         `SELECT identity_id, status, role, publish_identity, identity_name,
-                invite_quota, invite_used, presence_visible, avatar_blob_id IS NOT NULL AS has_avatar,
-                created_at, status_updated_at, avatar_updated_at
+                can_create_invites, can_create_guest_invites,
+                presence_visible, avatar_blob_id IS NOT NULL AS has_avatar,
+                created_at, avatar_updated_at
          FROM identities
          WHERE family_id = $1
          ORDER BY created_at DESC`,

@@ -164,26 +164,6 @@ export interface RevokeDevicePayload {
   localDeletionAuthorization?: DeviceLocalCircleDataDeletionAuthorization;
 }
 
-export interface UpdateDeviceLabelRequest {
-  deviceId: DeviceId;
-  label: string | null;
-  /** A sortable client-generated id shared across every Circle update. */
-  updateId: string;
-}
-
-export interface UpdateDeviceLabelResponse {
-  deviceId: DeviceId;
-  label: string | null;
-  updateId: string;
-  applied: boolean;
-}
-
-export interface WSDeviceLabelUpdatedData {
-  deviceId: DeviceId;
-  label: string | null;
-  updateId: string;
-}
-
 export type GroupEpochTransitionReason =
   | 'initial'
   | 'participant_removed'
@@ -622,14 +602,9 @@ export interface ReadDeviceEnrollmentStatusResponse {
 
 export interface InviteRecord {
   inviteId: InviteId;
-  title?: string | null;
   token: string;
   createdBy: IdentityId | 'system';
   createdAt: ISODateString;
-  acceptedByIdentityId?: IdentityId | null;
-  acceptedIdentityName?: string | null;
-  acceptedIdentityPublicKey?: string | null;
-  acceptedAt?: ISODateString | null;
   expiresAt: ISODateString;
   maxUses: number;
   usedCount: number;
@@ -689,12 +664,6 @@ export interface CircleIdentityAdmissionProof {
           capabilityProof: import('./linkCapability').LinkCapabilityProof;
           subjectAcceptance: import('./linkCapability').DirectGuestAcceptance;
         };
-      }
-    | {
-        kind: 'owner_recovery';
-        previousOwnerIdentityId: IdentityId;
-        previousOwnerPublicKey: PublicKey;
-        acceptance: CircleOwnerRecoveryAcceptance;
       }
     | null;
 }
@@ -820,6 +789,52 @@ export interface CircleEncryptedIdentityProfile {
   updatedAt?: ISODateString;
 }
 
+export interface CircleSharedMetadataPayload {
+  version: 1;
+  purpose: 'circle-shared-metadata-v1';
+  circleId: CircleId;
+  ownerIdentityId: IdentityId;
+  membershipStateId: string;
+  epoch: number;
+  keyCommitment: string;
+  revision: number;
+  displayName: string;
+  issuedAt: ISODateString;
+}
+
+export type CircleSharedMetadataClaim = SignedRequest<CircleSharedMetadataPayload, IdentityId>;
+
+export interface CircleEncryptedSharedMetadata {
+  ownerIdentityId: IdentityId;
+  epoch: number;
+  revision: number;
+  ciphertext: string;
+  updatedAt?: ISODateString;
+}
+
+export interface CircleIdentityStatusPayload {
+  version: 1;
+  purpose: 'circle-identity-status-v1';
+  circleId: CircleId;
+  ownerIdentityId: IdentityId;
+  membershipStateId: string;
+  epoch: number;
+  keyCommitment: string;
+  revision: number;
+  statusText: string | null;
+  issuedAt: ISODateString;
+}
+
+export type CircleIdentityStatusClaim = SignedRequest<CircleIdentityStatusPayload, IdentityId>;
+
+export interface CircleEncryptedIdentityStatus {
+  ownerIdentityId: IdentityId;
+  epoch: number;
+  revision: number;
+  ciphertext: string;
+  updatedAt?: ISODateString;
+}
+
 export interface CircleMembershipTrustCheckpoint {
   sequence: number;
   stateId: string;
@@ -915,6 +930,14 @@ export interface VaultContact {
     revocation?: import('./directGuestRevocation').DirectGuestRevocation;
     linkId?: string;
     linkTitle?: string;
+    servicePurpose?: 'managed_push_support';
+    managedPushRequest?: {
+      requestId: string;
+      serverUrl: string;
+      expiresAt: ISODateString;
+      message?: string;
+      completedAt?: ISODateString;
+    };
     hostIdentityId: IdentityId;
     guestIdentityId?: IdentityId;
   };
@@ -981,6 +1004,11 @@ export interface VaultDeviceEntry {
   updatedAt: ISODateString;
 }
 
+export interface VaultDeviceLabelEntry {
+  label: string;
+  updatedAt: ISODateString;
+}
+
 /** Request written by a device that wants to receive the master key. */
 export interface VaultMkTransferRequest {
   /**
@@ -1033,6 +1061,8 @@ export interface VaultData {
   // Master key status per device. Keyed by deviceId.
   // Written by each device to all its circles so peers can see who holds a master key.
   devices?: Record<string, VaultDeviceEntry>;
+  /** User-visible device names, scoped per identity and stored only in the encrypted vault. */
+  deviceLabels?: Record<IdentityId, Record<DeviceId, VaultDeviceLabelEntry>>;
   // Pending master key transfer requests. Keyed by requesting deviceId.
   pendingMkRequests?: Record<string, VaultMkTransferRequest>;
   // Pending master key transfer responses. Keyed by requesting deviceId.
@@ -1256,23 +1286,7 @@ export interface RegisterOwnerIdentityPayload extends RegisterIdentityPayload {
   ownerClaimToken: string;
 }
 
-export type CircleOwnerChangeMethod = 'voluntary_transfer' | 'server_admin_recovery';
-
-export interface CircleOwnerRecoveryAcceptancePayload {
-  version: 1;
-  purpose: 'circle-owner-recovery-v1';
-  familyId: string;
-  expectedOwnerIdentityId: IdentityId;
-  recoveryClaimId?: string;
-  identityPublicKey: PublicKey;
-  encryptedIdentityPrivateKey?: EncryptedBlob;
-  deviceRegistration: SignedRequest<RegisterDevicePayload, IdentityId>;
-}
-
-export type CircleOwnerRecoveryAcceptance = SignedRequest<
-  CircleOwnerRecoveryAcceptancePayload,
-  IdentityId
->;
+export type CircleOwnerChangeMethod = 'voluntary_transfer';
 
 export interface RegisterDevicePayload {
   /** Stable id created locally before the registration request is sent. */
@@ -1283,7 +1297,6 @@ export interface RegisterDevicePayload {
   deviceEncryptionPublicKey?: PublicKey;
   /** Proof that the device signing key owner bound the signing and encryption keys together. */
   deviceKeyBinding?: SignedRequest<DeviceKeyBindingPayload, string>;
-  deviceLabel?: string;
   encryptedPhysicalDeviceId?: EncryptedBlob | null;
 }
 
@@ -1412,7 +1425,6 @@ export interface QuickReceiveGrantPayload {
   grantId: string;
   receiverIdentityId: IdentityId;
   targetDeviceId: DeviceId;
-  targetDeviceLabel?: string;
   authorizedSenderIdentityId: IdentityId;
   issuedAt: ISODateString;
   maxFileSizeBytes?: number;
@@ -1610,7 +1622,6 @@ export type SystemEventGuestMembershipInvitePayload = {
 
 export type SystemEventDeviceInactivityWarningPayload = {
   deviceId: DeviceId;
-  deviceLabel?: string | null;
   inactiveDays: number;
   reviewAfterDays: number;
   autoRevokeAfterDays: number;
@@ -1629,7 +1640,8 @@ export type SystemEventCircleOwnerChangedPayload = {
   previousOwnerIdentityName?: string;
   newOwnerIdentityId: IdentityId;
   newOwnerIdentityName?: string;
-  method: CircleOwnerChangeMethod;
+  /** `server_admin_recovery` is retained only to identify and reject legacy unsigned events. */
+  method: CircleOwnerChangeMethod | 'server_admin_recovery';
   initiatedByIdentityId: IdentityId;
   changedAt: ISODateString;
   ownerRoleDocumentVersion: string;
@@ -2081,7 +2093,6 @@ export type WSDirectFileTransferIncomingData = {
   fromIdentityId: IdentityId;
   fromIdentityName?: string;
   fromDeviceId?: DeviceId;
-  fromDeviceLabel?: string;
   metadata: WSDirectFileTransferMetadata;
   offer: unknown;
   targetDeviceId?: DeviceId;
@@ -2278,6 +2289,8 @@ export type WSMessageDeliverData = {
   serverMessageId: string;
   senderIdentityId: IdentityId;
   recipientIdentityId: IdentityId;
+  /** Device that originally authored a self-chat message; omitted for regular direct chats. */
+  senderDeviceId?: DeviceId;
   /**
    * Optional sender identity public key for decrypting messages when the receiver
    * doesn't yet have the sender saved in their vault.

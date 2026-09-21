@@ -81,8 +81,7 @@ describe('direct guest link mutation service', () => {
   test('creates the link and attaches the selected channel in one transaction', async () => {
     const result = await createDirectGuestLink({
       link,
-      requestedChannelId: 'channel-1',
-      newChannelTitle: null
+      requestedChannelId: 'channel-1'
     });
 
     expect(directGuestLinkRepository.create).toHaveBeenCalledWith(link, transactionClient);
@@ -101,13 +100,24 @@ describe('direct guest link mutation service', () => {
 
     await expect(createDirectGuestLink({
       link,
-      requestedChannelId: 'channel-1',
-      newChannelTitle: null
+      requestedChannelId: 'channel-1'
     })).rejects.toMatchObject<Partial<DirectGuestLinkMutationError>>({
       status: 400,
       code: 'INVALID_REQUEST'
     });
     expect(publicSiteGeneratorService.regenerateSite).not.toHaveBeenCalled();
+  });
+
+  test('does not create an implicit channel for a guest link', async () => {
+    await expect(createDirectGuestLink({
+      link,
+      requestedChannelId: null
+    })).rejects.toMatchObject<Partial<DirectGuestLinkMutationError>>({
+      status: 400,
+      code: 'INVALID_REQUEST'
+    });
+    expect(directGuestLinkRepository.create).not.toHaveBeenCalled();
+    expect(announcementChannelRepository.create).not.toHaveBeenCalled();
   });
 
   test('rejects a public link without explicit channel subscription', async () => {
@@ -120,8 +130,7 @@ describe('direct guest link mutation service', () => {
 
     await expect(createDirectGuestLink({
       link: publicLink,
-      requestedChannelId: null,
-      newChannelTitle: null
+      requestedChannelId: null
     })).rejects.toMatchObject<Partial<DirectGuestLinkMutationError>>({
       status: 400,
       code: 'INVALID_REQUEST'

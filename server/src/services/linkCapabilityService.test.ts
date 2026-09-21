@@ -102,4 +102,74 @@ describe('link capability verification', () => {
       expectedSubjectPublicKey: subjectPublicKey
     })).toBe(false);
   });
+
+  test('rejects legacy V1 capability descriptors and proofs', async () => {
+    const issuerKeys = nacl.sign.keyPair();
+    const capabilityKeys = nacl.sign.keyPair();
+    const subjectKeys = nacl.sign.keyPair();
+    const issuerPublicKey = publicKey(issuerKeys.publicKey);
+    const subjectPublicKey = publicKey(subjectKeys.publicKey);
+    const issuerIdentityId = await deriveIdentityIdFromPublicKey(issuerPublicKey);
+    const subjectIdentityId = await deriveIdentityIdFromPublicKey(subjectPublicKey);
+    const capabilityId = `cap_${crypto.createHash('sha256')
+      .update(capabilityKeys.publicKey)
+      .digest()
+      .subarray(0, 18)
+      .toString('base64url')}`;
+    const descriptor = sign(
+      'link-capability:descriptor',
+      issuerIdentityId,
+      {
+        version: 2 as const,
+        purpose: 'circlus-link-capability-v2' as const,
+        capabilityId,
+        kind: 'direct-guest' as const,
+        mode: 'unlimited' as const,
+        issuerIdentityId,
+        targetIdentityId: issuerIdentityId,
+        capabilityPublicKey: publicKey(capabilityKeys.publicKey),
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        scope: {}
+      },
+      issuerKeys.secretKey
+    ) as LinkCapabilityDescriptor;
+    const proof = sign(
+      'link-capability:proof',
+      capabilityId,
+      {
+        version: 2 as const,
+        purpose: 'circlus-link-capability-proof-v2' as const,
+        capabilityId,
+        action: 'direct-guest:register' as const,
+        targetIdentityId: issuerIdentityId,
+        subjectIdentityId,
+        subjectPublicKey,
+        context: {}
+      },
+      capabilityKeys.secretKey
+    ) as LinkCapabilityProof;
+
+    await expect(verifyCapabilityDescriptor({
+      descriptor: {
+        ...descriptor,
+        payload: { ...descriptor.payload, version: 1, purpose: 'circlus-link-capability-v1' }
+      } as unknown as LinkCapabilityDescriptor,
+      issuerPublicKey,
+      expectedKind: 'direct-guest',
+      expectedIssuerIdentityId: issuerIdentityId,
+      expectedTargetIdentityId: issuerIdentityId
+    })).resolves.toBe(false);
+
+    expect(verifyCapabilityProof({
+      proof: {
+        ...proof,
+        payload: { ...proof.payload, version: 1, purpose: 'circlus-link-capability-proof-v1' }
+      } as unknown as LinkCapabilityProof,
+      descriptor,
+      expectedAction: 'direct-guest:register',
+      expectedSubjectIdentityId: subjectIdentityId,
+      expectedSubjectPublicKey: subjectPublicKey
+    })).toBe(false);
+  });
 });

@@ -39,10 +39,18 @@ router.post('/set', verifySignature, requireActiveIdentity, requireFullCircleIde
     }
 
     const payload = req.signedRequest!.payload as {
+      backupProtocolVersion?: number;
       encryptedBackup?: EncryptedBlob;
       backupLookupSecretHash?: string;
       backupSlotId?: string;
     };
+
+    if (payload.backupProtocolVersion !== 2) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_STATE' as ErrorCode, message: 'Unsupported backup protocol version' }
+      } as ApiResponse);
+    }
 
     if (!payload.encryptedBackup) {
       return res.status(400).json({
@@ -108,7 +116,11 @@ router.post('/list', openCors, async (req, res) => {
       } as ApiResponse);
     }
 
-    const body = req.body as { backupLookupSecret?: string };
+    const body = req.body as { backupProtocolVersion?: number; backupLookupSecret?: string };
+
+    if (body.backupProtocolVersion !== 2) {
+      return res.json({ status: 'ok', result: { backups: [] } } as ApiResponse);
+    }
 
     if (typeof body.backupLookupSecret !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.backupLookupSecret)) {
       return res.json({ status: 'ok', result: { backups: [] } } as ApiResponse);

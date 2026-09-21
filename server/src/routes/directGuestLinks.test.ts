@@ -299,7 +299,10 @@ describe('direct guest link host restrictions', () => {
     }));
   });
 
-  test.each([undefined, null, 'Anton'])('allows an owner to create a guest link with inviter name %s and no private label', async (hostIdentityName) => {
+  test.each([
+    undefined,
+    { cipher: 'aes-256-gcm', data: 'host-name-data', nonce: 'host-name-nonce', version: 1 }
+  ])('allows an owner to create a guest link with encrypted inviter name %p and no private label', async (hostIdentityNameCiphertext) => {
     const repositories = require('../db/repositories');
     repositories.directGuestLinkRepository.create.mockResolvedValue({
       link_id: 'link_1',
@@ -331,6 +334,7 @@ describe('direct guest link host restrictions', () => {
       guestCanDirectFileTransferHost: false,
       autoSubscribeToChannel: false
     };
+    const privateMetadataCiphertext = { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 };
 
     await getPostHandler('/create')({
       familyId: 'family_1',
@@ -340,9 +344,10 @@ describe('direct guest link host restrictions', () => {
       get: (name: string) => name === 'host' ? 'circle.example' : undefined,
       signedRequest: {
         payload: {
-          ...(hostIdentityName !== undefined ? { hostIdentityName } : {}),
+          ...(hostIdentityNameCiphertext !== undefined ? { hostIdentityNameCiphertext } : {}),
           canMessage: true,
           canCall: true,
+          privateMetadataCiphertext,
           mode: 'unlimited',
           expiresAt,
           encryptedSecret: { cipher: 'aes-256-gcm', data: 'data', nonce: 'nonce', version: 1 },
@@ -363,7 +368,7 @@ describe('direct guest link host restrictions', () => {
               capabilityPublicKey: { algorithm: 'ed25519', value: 'capability_key' },
               issuedAt: new Date().toISOString(),
               expiresAt,
-              scope: { title: null, permissions, channelId: null, ...(hostIdentityName !== undefined ? { hostIdentityName } : {}) }
+              scope: { privateMetadataCiphertext, permissions, channelId: null, ...(hostIdentityNameCiphertext !== undefined ? { hostIdentityNameCiphertext } : {}) }
             }
           }
         }
@@ -607,7 +612,7 @@ describe('direct guest link host restrictions', () => {
     });
     expect(res.json).toHaveBeenCalledWith({
       status: 'ok',
-      result: [{ channelId: 'channel_1', title: 'Updates', keyEpoch: 3 }]
+      result: [{ channelId: 'channel_1', keyEpoch: 3 }]
     });
   });
 
@@ -655,7 +660,7 @@ describe('direct guest link host restrictions', () => {
       status: 'ok',
       result: expect.objectContaining({
         registrationId: 'reg_1',
-        removedChannels: [{ channelId: 'channel_1', title: 'Updates', keyEpoch: 3 }]
+        removedChannels: [{ channelId: 'channel_1', keyEpoch: 3 }]
       })
     }));
   });

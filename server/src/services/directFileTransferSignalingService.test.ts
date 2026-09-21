@@ -93,8 +93,7 @@ describe('DirectFileTransferSignalingService device routing', () => {
       findDevice: async (_familyId, deviceId) => ({
         device_id: deviceId,
         identity_id: deviceId.startsWith('sender') ? 'sender' : 'receiver',
-        status: 'active',
-        label: deviceId === 'sender-device' ? 'Phone' : 'Computer'
+        status: 'active'
       }) as any,
       validateGrant: () => grantValid,
       wakeTargetDevice: async (params) => {
@@ -312,7 +311,7 @@ describe('DirectFileTransferSignalingService device routing', () => {
     expect(wakes).toEqual([]);
   });
 
-  it('includes the source device only when a file is sent to the same identity', async () => {
+  it('includes only the source device id when a file is sent to the same identity', async () => {
     await service.handleOffer(sender, {
       sessionId: 'self-session',
       targetIdentityId: 'sender',
@@ -323,9 +322,9 @@ describe('DirectFileTransferSignalingService device routing', () => {
     });
 
     expect(registry.get('self-session')?.incomingData).toMatchObject({
-      fromDeviceId: 'sender-device',
-      fromDeviceLabel: 'Phone'
+      fromDeviceId: 'sender-device'
     });
+    expect(registry.get('self-session')?.incomingData).not.toHaveProperty('fromDeviceLabel');
 
     identityOnline = true;
     await service.handleOffer(sender, {

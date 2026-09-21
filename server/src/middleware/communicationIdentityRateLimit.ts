@@ -10,7 +10,7 @@ const READ_TYPES = new Set([
   'msg:reactions:list', 'msg:http:key-fetch', 'msg:http:list', 'msg:http:status-list',
   'msg:http:clear-boundary',
   'grp:reactions:list', 'grp:list', 'grp:keys:fetch', 'grp:keys:coverage',
-  'grp:leave-check', 'grp:message:readers', 'grp:messages:list',
+  'grp:message:readers', 'grp:messages:list',
   'grp:messages:clear-boundary', 'grp:participants:list', 'grp:state:list',
   'announcement-channels:mine', 'announcement-channels:posts:activity',
   'announcement-channels:posts:list', 'announcement-channels:post-engagement',

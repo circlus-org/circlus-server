@@ -18,6 +18,7 @@ import type {
 import { messageRepository } from '../db/repositories';
 import { query } from '../db';
 import type { AuthenticatedActor } from '../services/authenticatedActor';
+import { getSelfChatSenderDeviceId } from '../services/directMessageDeviceMetadata';
 import {
   DirectMessageServiceError,
   deleteDirectMessage,
@@ -169,6 +170,11 @@ export class DirectMessageWsHandlers {
       serverMessageId: message.server_message_id,
       senderIdentityId: message.sender_identity_id,
       recipientIdentityId: message.recipient_identity_id,
+      senderDeviceId: getSelfChatSenderDeviceId(
+        message.sender_identity_id,
+        message.recipient_identity_id,
+        message.sender_device_id
+      ),
       senderIdentityPublicKey: senderKeysById.get(message.sender_identity_id),
       ciphertext: message.ciphertext,
       senderCiphertext: message.sender_ciphertext ?? undefined,

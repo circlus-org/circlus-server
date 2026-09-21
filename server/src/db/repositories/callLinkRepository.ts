@@ -33,7 +33,6 @@ export type CallLinkRecord = {
 };
 
 export type OwnedCallLinkRecord = CallLinkRecord & {
-  join_invite_title: string | null;
   join_invite_expires_at: Date | null;
 };
 
@@ -44,7 +43,7 @@ export class CallLinkRepository {
     role?: string;
     callLinkId: string;
     secretHash: string;
-    title: string;
+    title: string | null;
     suggestJoinAfterCall: boolean;
     expiresAt: Date;
     joinInviteId: string | null;
@@ -57,7 +56,6 @@ export class CallLinkRepository {
     directGuestInvitation?: {
       linkId: string;
       capabilityDescriptor: LinkCapabilityDescriptor;
-      presentationTitle: string | null;
     } | null;
   }): Promise<{
     ok: boolean;
@@ -122,8 +120,8 @@ export class CallLinkRepository {
           secretHash: params.capabilityId,
           encryptedSecret: params.encryptedSecret,
           ...permissions,
-          title: params.title,
-          presentationTitle: params.directGuestInvitation.presentationTitle,
+          title: null,
+          presentationTitle: null,
           maxUses: 1,
           capabilityId: params.capabilityId,
           capabilityMode: 'single-use',
@@ -227,7 +225,7 @@ export class CallLinkRepository {
               call_link.expires_at, call_link.last_used_at, call_link.revoked_at,
               call_link.capability_id, call_link.capability_public_key,
               call_link.capability_mode, call_link.capability_descriptor, call_link.encrypted_secret,
-              invite.status AS join_invite_status, invite.title AS join_invite_title,
+              invite.status AS join_invite_status,
               invite.expires_at AS join_invite_expires_at,
               direct_guest.status AS direct_guest_link_status,
               direct_guest.capability_descriptor AS direct_guest_capability_descriptor
@@ -270,7 +268,7 @@ export class CallLinkRepository {
     return transaction(async (client) => {
       const linkResult = await client.query<OwnedCallLinkRecord>(
         `SELECT call_link.*, invite.status AS join_invite_status,
-                invite.title AS join_invite_title, invite.expires_at AS join_invite_expires_at,
+                invite.expires_at AS join_invite_expires_at,
                 direct_guest.status AS direct_guest_link_status,
                 direct_guest.capability_descriptor AS direct_guest_capability_descriptor
          FROM call_links call_link
@@ -336,7 +334,6 @@ export class CallLinkRepository {
           join_invite_status: row.join_invite_id && row.join_invite_status === 'active'
             ? 'revoked'
             : row.join_invite_status,
-          join_invite_title: row.join_invite_title,
           join_invite_expires_at: row.join_invite_expires_at,
           direct_guest_link_status: row.direct_guest_link_id && row.direct_guest_link_status === 'active'
             ? 'revoked'

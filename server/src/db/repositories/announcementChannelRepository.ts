@@ -2,8 +2,6 @@ import { nanoid } from 'nanoid';
 import { getClient, pool, transaction } from '../index';
 import type { PoolClient } from 'pg';
 
-export type AnnouncementChannelVisibility = 'public' | 'circle' | 'guest_links' | 'explicit';
-export type AnnouncementChannelContentMode = 'private_e2ee' | 'public_plaintext';
 export type AnnouncementChannelStatus = 'active' | 'archived' | 'deleted';
 export type AnnouncementChannelSubscriptionStatus = 'active' | 'paused' | 'unsubscribed' | 'removed_by_author';
 export type AnnouncementChannelPublicSiteState = 'hidden' | 'requested' | 'published';
@@ -12,13 +10,20 @@ export type AnnouncementChannelRecord = {
   channel_id: string;
   family_id: string;
   owner_identity_id: string;
-  title: string;
+  title: null;
   description: string | null;
-  members_can_subscribe: boolean;
-  owner_guests_can_subscribe: boolean;
-  other_guests_can_subscribe: boolean;
-  visibility: AnnouncementChannelVisibility;
-  content_mode: AnnouncementChannelContentMode;
+  metadata_epoch: number | null;
+  metadata_ciphertext: string | null;
+  metadata_revision: number;
+  metadata_author_device_id: string | null;
+  metadata_author_claim: unknown | null;
+  metadata_author_device_public_key_algorithm?: string;
+  metadata_author_device_public_key_value?: string;
+  metadata_author_device_encryption_public_key_algorithm?: string;
+  metadata_author_device_encryption_public_key_value?: string;
+  metadata_author_device_registration_attestation?: unknown;
+  metadata_author_identity_public_key_algorithm?: string;
+  metadata_author_identity_public_key_value?: string;
   reactions_enabled: boolean;
   is_default: boolean;
   disclose_server_admin_status: boolean;
@@ -145,7 +150,6 @@ export type AnnouncementChannelRecipientRecord = {
 
 export type OwnedChannelSubscriptionImpactRecord = {
   channel_id: string;
-  title: string;
   key_epoch: number;
   subscription_id: string;
 };
@@ -169,29 +173,20 @@ export type PublicSiteAnnouncementChannelRecord = AnnouncementChannelRecord & {
   public_site_guest_link_url: string | null;
 };
 
-function normalizeTitle(title: string | null | undefined): string {
-  return String(title || '').trim().slice(0, 160) || 'Announcements';
-}
-
 export class AnnouncementChannelRepository {
   async create(input: {
     familyId: string;
     ownerIdentityId: string;
-    title?: string | null;
-    description?: string | null;
   }, client?: PoolClient): Promise<AnnouncementChannelRecord> {
     const result = await (client || pool).query<AnnouncementChannelRecord>(
       `INSERT INTO announcement_channels (
-         channel_id, family_id, owner_identity_id, title, description,
-         visibility, content_mode, is_default
-       ) VALUES ($1, $2, $3, $4, $5, 'circle', 'private_e2ee', FALSE)
+         channel_id, family_id, owner_identity_id, title, description, is_default
+       ) VALUES ($1, $2, $3, NULL, NULL, FALSE)
        RETURNING *`,
       [
         `ach_${nanoid(22)}`,
         input.familyId,
         input.ownerIdentityId,
-        normalizeTitle(input.title),
-        String(input.description || '').trim().slice(0, 2000) || null,
       ]
     );
     return result.rows[0];
@@ -209,60 +204,40 @@ export class AnnouncementChannelRepository {
     return result.rows[0] || null;
   }
 
-  async updateDetails(input: {
+  async updateMetadata(input: {
     familyId: string;
     channelId: string;
     ownerIdentityId: string;
-    title: string;
-    description?: string | null;
+    epoch: number;
+    expectedRevision: number;
+    ciphertext: string;
+    authorDeviceId: string;
+    authorClaim: unknown;
   }): Promise<AnnouncementChannelRecord | null> {
     const result = await pool.query<AnnouncementChannelRecord>(
       `UPDATE announcement_channels
-          SET title = $4,
-              description = $5,
+          SET metadata_epoch = $4,
+              metadata_ciphertext = $5,
+              metadata_revision = metadata_revision + 1,
+              metadata_author_device_id = $6,
+              metadata_author_claim = $7::jsonb,
               updated_at = NOW()
         WHERE family_id = $1
           AND channel_id = $2
           AND owner_identity_id = $3
           AND status = 'active'
+          AND key_epoch = $4
+          AND metadata_revision = $8
        RETURNING *`,
       [
         input.familyId,
         input.channelId,
         input.ownerIdentityId,
-        normalizeTitle(input.title),
-        String(input.description || '').trim().slice(0, 2000) || null,
-      ]
-    );
-    return result.rows[0] || null;
-  }
-
-  async updateAudience(input: {
-    familyId: string;
-    channelId: string;
-    ownerIdentityId: string;
-    membersCanSubscribe: boolean;
-    ownerGuestsCanSubscribe: boolean;
-    otherGuestsCanSubscribe: boolean;
-  }): Promise<AnnouncementChannelRecord | null> {
-    const result = await pool.query<AnnouncementChannelRecord>(
-      `UPDATE announcement_channels
-          SET members_can_subscribe = $4,
-              owner_guests_can_subscribe = $5,
-              other_guests_can_subscribe = $6,
-              updated_at = NOW()
-        WHERE family_id = $1
-          AND channel_id = $2
-          AND owner_identity_id = $3
-          AND status = 'active'
-       RETURNING *`,
-      [
-        input.familyId,
-        input.channelId,
-        input.ownerIdentityId,
-        input.membersCanSubscribe,
-        input.ownerGuestsCanSubscribe,
-        input.otherGuestsCanSubscribe,
+        input.epoch,
+        input.ciphertext,
+        input.authorDeviceId,
+        JSON.stringify(input.authorClaim),
+        input.expectedRevision,
       ]
     );
     return result.rows[0] || null;
@@ -405,7 +380,6 @@ export class AnnouncementChannelRepository {
     familyId: string;
     linkId: string;
     ownerIdentityId: string;
-    title?: string | null;
   }, externalClient?: PoolClient): Promise<AnnouncementChannelRecord> {
     const client = externalClient || await getClient();
     const ownsTransaction = !externalClient;
@@ -443,11 +417,10 @@ export class AnnouncementChannelRepository {
       if (!channel.rows[0]) {
         await client.query(
           `INSERT INTO announcement_channels (
-             channel_id, family_id, owner_identity_id, title,
-             visibility, content_mode, is_default
-           ) VALUES ($1, $2, $3, $4, 'circle', 'private_e2ee', TRUE)
+             channel_id, family_id, owner_identity_id, title, description, is_default
+           ) VALUES ($1, $2, $3, NULL, NULL, TRUE)
            ON CONFLICT DO NOTHING`,
-          [`ach_${nanoid(22)}`, input.familyId, input.ownerIdentityId, normalizeTitle(input.title)]
+          [`ach_${nanoid(22)}`, input.familyId, input.ownerIdentityId]
         );
         channel = await client.query<AnnouncementChannelRecord>(
           `SELECT *
@@ -498,7 +471,6 @@ export class AnnouncementChannelRepository {
     ownerIdentityId: string;
     linkIds: string[];
     autoSubscribeLinkIds: string[];
-    defaultTitle?: string | null;
   }): Promise<Array<{ link_id: string; channel_id: string }>> {
     if (input.linkIds.length === 0) return [];
     return transaction(async (client) => {
@@ -528,11 +500,10 @@ export class AnnouncementChannelRepository {
       if (!defaultChannel.rows[0]) {
         await client.query(
           `INSERT INTO announcement_channels (
-             channel_id, family_id, owner_identity_id, title,
-             visibility, content_mode, is_default
-           ) VALUES ($1, $2, $3, $4, 'circle', 'private_e2ee', TRUE)
+             channel_id, family_id, owner_identity_id, title, description, is_default
+           ) VALUES ($1, $2, $3, NULL, NULL, TRUE)
            ON CONFLICT DO NOTHING`,
-          [`ach_${nanoid(22)}`, input.familyId, input.ownerIdentityId, normalizeTitle(input.defaultTitle)]
+          [`ach_${nanoid(22)}`, input.familyId, input.ownerIdentityId]
         );
         defaultChannel = await client.query<{ channel_id: string }>(
           `SELECT channel_id
@@ -579,6 +550,13 @@ export class AnnouncementChannelRepository {
     const result = await pool.query<VisibleAnnouncementChannelRecord>(
       `SELECT
          c.*,
+         metadata_device.public_key_algorithm AS metadata_author_device_public_key_algorithm,
+         metadata_device.public_key_value AS metadata_author_device_public_key_value,
+         metadata_device.encryption_public_key_algorithm AS metadata_author_device_encryption_public_key_algorithm,
+         metadata_device.encryption_public_key_value AS metadata_author_device_encryption_public_key_value,
+         metadata_device.registration_attestation AS metadata_author_device_registration_attestation,
+         metadata_identity.public_key_algorithm AS metadata_author_identity_public_key_algorithm,
+         metadata_identity.public_key_value AS metadata_author_identity_public_key_value,
          s.subscription_id,
          s.status AS subscription_status,
          s.notifications_enabled,
@@ -619,43 +597,17 @@ export class AnnouncementChannelRepository {
          ON s.family_id = c.family_id
         AND s.channel_id = c.channel_id
         AND s.subscriber_identity_id = $2
+       LEFT JOIN devices metadata_device
+         ON metadata_device.device_id = c.metadata_author_device_id
+       LEFT JOIN identities metadata_identity
+         ON metadata_identity.family_id = c.family_id
+        AND metadata_identity.identity_id = c.owner_identity_id
        WHERE c.family_id = $1
          AND c.status = 'active'
+         AND (c.owner_identity_id = $2 OR s.status IS DISTINCT FROM 'removed_by_author')
          AND (
            c.owner_identity_id = $2
-           OR s.status IS DISTINCT FROM 'removed_by_author'
-         )
-         AND (
-           c.owner_identity_id = $2
-           OR c.visibility = 'public'
-           OR (
-             $3 IN ('owner', 'member')
-             AND c.members_can_subscribe = TRUE
-           )
-           OR (
-             $3 = 'guest'
-             AND c.owner_guests_can_subscribe = TRUE
-             AND EXISTS (
-               SELECT 1
-               FROM direct_guest_registrations registration
-               WHERE registration.family_id = c.family_id
-                 AND registration.guest_identity_id = $2
-                 AND registration.host_identity_id = c.owner_identity_id
-                 AND registration.status = 'active'
-             )
-           )
-           OR (
-             $3 = 'guest'
-             AND c.other_guests_can_subscribe = TRUE
-             AND EXISTS (
-               SELECT 1
-               FROM direct_guest_registrations registration
-               WHERE registration.family_id = c.family_id
-                 AND registration.guest_identity_id = $2
-                 AND registration.host_identity_id <> c.owner_identity_id
-                 AND registration.status = 'active'
-             )
-           )
+           OR $3 IN ('owner', 'member')
            OR EXISTS (
              SELECT 1
              FROM announcement_channel_links acl
@@ -668,6 +620,7 @@ export class AnnouncementChannelRepository {
                AND acl.channel_id = c.channel_id
            )
            OR s.status = 'active'
+           OR s.status = 'unsubscribed'
          )
        ORDER BY c.is_default DESC, c.created_at ASC`,
       [input.familyId, input.identityId, input.role || '']
@@ -919,7 +872,7 @@ export class AnnouncementChannelRepository {
     guestIdentityId: string;
   }, client?: PoolClient): Promise<OwnedChannelSubscriptionImpactRecord[]> {
     const result = await (client || pool).query<OwnedChannelSubscriptionImpactRecord>(
-      `SELECT channel.channel_id, channel.title, channel.key_epoch, subscription.subscription_id
+      `SELECT channel.channel_id, channel.key_epoch, subscription.subscription_id
          FROM announcement_channel_subscriptions subscription
          JOIN announcement_channels channel
            ON channel.family_id = subscription.family_id
@@ -1349,9 +1302,13 @@ export class AnnouncementChannelRepository {
               eligible.source_link_id, eligible.subscription_claim
          FROM identities i
          JOIN (
-           SELECT c.family_id, c.channel_id, c.owner_identity_id AS identity_id,
+           SELECT c.family_id, c.channel_id, member.identity_id,
                   NULL::text AS source_link_id, NULL::jsonb AS subscription_claim
              FROM announcement_channels c
+             JOIN identities member
+               ON member.family_id = c.family_id
+              AND member.status = 'active'
+              AND member.role IN ('owner', 'member')
             WHERE c.family_id = $1 AND c.channel_id = $2 AND c.owner_identity_id = $3
            UNION
            SELECT s.family_id, s.channel_id, s.subscriber_identity_id,

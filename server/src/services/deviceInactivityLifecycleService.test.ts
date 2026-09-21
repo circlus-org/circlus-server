@@ -30,7 +30,6 @@ const candidate = {
   circleId: 'https://circle.example',
   deviceId: 'device-old',
   identityId: 'identity-1',
-  label: 'Old phone',
   lastActivityAt: new Date('2025-01-01T00:00:00.000Z'),
   warningSentAt: null as Date | null
 };

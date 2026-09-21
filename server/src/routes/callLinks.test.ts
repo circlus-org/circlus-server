@@ -84,7 +84,7 @@ describe('call link management', () => {
     const expiresAt = new Date(startedAt + 24 * 60 * 60 * 1000).toISOString();
 
     await getPostHandler('/create')(authRequest({
-      title: 'Customer support',
+      privateMetadataCiphertext: { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 },
       ttlHours: 24,
       expiresAt,
       suggestJoinAfterCall: true,
@@ -109,7 +109,7 @@ describe('call link management', () => {
           issuedAt: new Date(startedAt).toISOString(),
           expiresAt,
           scope: {
-            title: 'Customer support',
+            privateMetadataCiphertext: { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 },
             suggestJoinAfterCall: true,
             joinMode: 'single-use',
             showCircleName: true
@@ -119,13 +119,13 @@ describe('call link management', () => {
     }), res);
 
     const params = (callLinkRepository.createWithOptionalInvite as jest.Mock).mock.calls[0][0];
-    expect(params.title).toBe('Customer support');
+    expect(params.title).toBeNull();
     expect(params.expiresAt.getTime()).toBeGreaterThanOrEqual(startedAt + 24 * 60 * 60 * 1000);
     expect(params.joinInviteExpiresAt).toBe(params.expiresAt);
     expect(res.status).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       status: 'ok',
-      result: expect.objectContaining({ title: 'Customer support', joinInviteId: 'invite_1' })
+      result: expect.objectContaining({ title: null, joinInviteId: 'invite_1' })
     }));
   });
 
@@ -163,7 +163,7 @@ describe('call link management', () => {
         ...capabilityPayload,
         kind: 'call-link', mode: 'unlimited',
         scope: {
-          title: 'Customer support', suggestJoinAfterCall: false, joinMode: null,
+          privateMetadataCiphertext: { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 }, suggestJoinAfterCall: false, joinMode: null,
           showCircleName: true, attachedInvitationKind: 'direct_guest'
         }
       }
@@ -174,24 +174,27 @@ describe('call link management', () => {
       payload: {
         ...capabilityPayload,
         kind: 'direct-guest', mode: 'single-use',
-        scope: { title: 'Customer support', permissions, channelId: null, hostIdentityName: 'Host' }
+        scope: {
+          privateMetadataCiphertext: { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 }, permissions, channelId: null,
+          hostIdentityNameCiphertext: { cipher: 'aes-256-gcm', data: 'host-name-data', nonce: 'host-name-nonce', version: 1 }
+        }
       }
     };
     const res = response();
 
     await getPostHandler('/create')(authRequest({
-      title: 'Customer support', ttlHours: 24, expiresAt,
+      privateMetadataCiphertext: { cipher: 'aes-256-gcm', data: 'private-metadata', nonce: 'private-nonce', version: 1 }, ttlHours: 24, expiresAt,
       suggestJoinAfterCall: false, showCircleName: true, mode: 'unlimited',
       attachedInvitationKind: 'direct_guest',
       capabilityDescriptor: callDescriptor,
       directGuestCapabilityDescriptor: guestDescriptor,
-      directGuestPresentationTitle: 'Host',
+      directGuestHostNameCiphertext: { cipher: 'aes-256-gcm', data: 'host-name-data', nonce: 'host-name-nonce', version: 1 },
       encryptedSecret: { cipher: 'aes-256-gcm', data: 'data', nonce: 'nonce', version: 1 }
     }), res);
 
     expect(callLinkRepository.createWithOptionalInvite).toHaveBeenCalledWith(expect.objectContaining({
       suggestJoinAfterCall: false,
-      directGuestInvitation: expect.objectContaining({ capabilityDescriptor: guestDescriptor, presentationTitle: 'Host' })
+      directGuestInvitation: expect.objectContaining({ capabilityDescriptor: guestDescriptor })
     }));
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       status: 'ok', result: expect.objectContaining({ directGuestLinkId: 'dgl_linked' })
@@ -267,7 +270,7 @@ describe('call link management', () => {
 
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       status: 'ok',
-      result: expect.objectContaining({ title: 'Private call', serverName: null })
+      result: expect.objectContaining({ title: null, serverName: null })
     }));
   });
 

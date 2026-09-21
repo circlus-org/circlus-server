@@ -129,8 +129,7 @@ describe('persistCallTermination', () => {
       type: 'call:missed',
       payload: expect.objectContaining({
         remoteIdentityId: 'caller',
-        isTemporaryLinkCall: true,
-        callLinkTitle: 'Support call'
+        isTemporaryLinkCall: true
       })
     }));
   });

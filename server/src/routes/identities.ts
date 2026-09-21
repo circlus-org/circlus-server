@@ -14,11 +14,9 @@ import { notifyCircleServerDataDeleted, notifyIdentityServerDataDeleted } from '
 import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import type { TenancyRequest } from '../middleware/tenancy';
-import type { ApiResponse, PublicKey } from '../../../shared/types';
+import type { ApiResponse } from '../../../shared/types';
 import { createRateLimiter, ipFamilyKey } from '../middleware/rateLimit';
 import { getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
-import { listCircleIdentityAdmissionProofs } from '../services/circleMembershipProofService';
-import { listCircleMembershipStates } from '../services/circleMembershipStateService';
 import { circleProfileAvatarBlobId } from '../services/circleProfileAvatarPublication';
 
 const router = Router();
@@ -28,13 +26,6 @@ const router = Router();
 const AVATAR_MAX_CIPHERTEXT_BYTES = 480 * 1024;
 
 const identityRateLimits = getRateLimitRuntimeConfig().identities;
-const rlPublished = createRateLimiter({
-  name: 'identities:published',
-  windowMs: identityRateLimits.windowMs,
-  max: identityRateLimits.publishedMax,
-  keyFn: ipFamilyKey
-});
-
 const rlAvatar = createRateLimiter({
   name: 'identities:avatar-upload',
   windowMs: identityRateLimits.windowMs,
@@ -238,8 +229,6 @@ router.post(
         blobId,
         familyId,
         uploaderIdentityId: identityId,
-        originalFileName: 'encrypted-avatar',
-        mimeType: 'application/octet-stream',
         sizeBytes: imageBuffer.length,
         storageKey,
       });
@@ -282,10 +271,10 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /identities/settings  — get current identity settings in this circle
+// POST /identities/presence-settings — get current presence settings
 // ---------------------------------------------------------------------------
 router.post(
-  '/settings',
+  '/presence-settings',
   verifySignature,
   requireActiveIdentity,
   requireFullCircleIdentity,
@@ -307,13 +296,9 @@ router.post(
         status: 'ok',
         result: {
           presenceVisible: identity.presence_visible !== false,
-          identityName: null,
-          publishIdentity: false,
         }
       } as ApiResponse<{
         presenceVisible: boolean;
-        identityName: string | null;
-        publishIdentity: boolean;
       }>);
     } catch (error) {
       routeLogger.error('Get identity settings error:', error);
@@ -353,56 +338,6 @@ router.post(
     } catch (error) {
       routeLogger.error('Update presence visibility error:', error);
       return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } } as ApiResponse);
-    }
-  }
-);
-
-// ---------------------------------------------------------------------------
-// POST /identities/published  — list discoverable identities (existing)
-// ---------------------------------------------------------------------------
-router.post(
-  '/published',
-  rlPublished,
-  verifySignature,
-  requireActiveIdentity,
-  requireFullCircleIdentity,
-  async (req: AuthRequest & TenancyRequest, res) => {
-    try {
-      const familyId = req.familyId;
-      if (!familyId) {
-        return res.status(500).json({
-          status: 'error',
-          error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' }
-        });
-      }
-
-      const [, membershipProofs, membershipStates] = await Promise.all([
-        Promise.resolve([]),
-        listCircleIdentityAdmissionProofs(familyId),
-        listCircleMembershipStates(familyId),
-      ]);
-      const result = membershipProofs
-        .filter((proof) => proof.status === 'active' && proof.role !== 'guest')
-        .map((proof) => ({
-        identityId: proof.identityId,
-        publicKey: proof.publicKey,
-        identityName: null
-      }));
-
-      return res.json({
-        status: 'ok',
-        result: { identities: result, membershipProofs, membershipStates }
-      } as ApiResponse<{
-        identities: Array<{ identityId: string; publicKey: PublicKey; identityName: string | null }>;
-        membershipProofs: Awaited<ReturnType<typeof listCircleIdentityAdmissionProofs>>;
-        membershipStates: Awaited<ReturnType<typeof listCircleMembershipStates>>;
-      }>);
-    } catch (error) {
-      routeLogger.error('Published identities error:', error);
-      return res.status(500).json({
-        status: 'error',
-        error: { code: 'INTERNAL_ERROR', message: 'Internal server error' }
-      });
     }
   }
 );

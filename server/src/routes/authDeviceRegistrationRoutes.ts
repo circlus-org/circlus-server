@@ -163,9 +163,6 @@ router.post('/register-device', rlRegisterDevice, async (req, res) => {
       }
     }
 
-    const deviceLabel = typeof payload.deviceLabel === 'string'
-      ? payload.deviceLabel.trim().slice(0, 80)
-      : '';
     const webOrigin = normalizeTrustedOrigin(req.get('origin'));
 
     const signerIdentityId = signedRequest.signerId;
@@ -340,7 +337,7 @@ router.post('/register-device', rlRegisterDevice, async (req, res) => {
           }
           : null,
         registrationAttestation: parseRegistrationAttestation((existingDevice as any).registration_attestation),
-        label: existingDevice.label,
+        label: null,
         webOrigin: (existingDevice as any).web_origin || null,
         encryptedPhysicalDeviceId: (existingDevice as any).encrypted_physical_device_id || null,
         createdAt: existingDevice.created_at.toISOString(),
@@ -371,7 +368,6 @@ router.post('/register-device', rlRegisterDevice, async (req, res) => {
       devicePublicKey: payload.devicePublicKey,
       deviceEncryptionPublicKey: payload.deviceEncryptionPublicKey,
       registrationAttestation,
-      label: deviceLabel || null,
       webOrigin,
       encryptedPhysicalDeviceId: payload.encryptedPhysicalDeviceId || null
     });
@@ -390,7 +386,7 @@ router.post('/register-device', rlRegisterDevice, async (req, res) => {
         }
         : null,
       registrationAttestation: parseRegistrationAttestation((device as any).registration_attestation),
-      label: device.label,
+      label: null,
       webOrigin: (device as any).web_origin || null,
       encryptedPhysicalDeviceId: (device as any).encrypted_physical_device_id || null,
       createdAt: device.created_at.toISOString(),

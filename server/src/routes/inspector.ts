@@ -234,9 +234,8 @@ router.get('/access', requireInspectorSession, async (req: InspectorRequest, res
       tableBlock({
         table: 'invites',
         title: 'Member invite links',
-        description: 'Registration invites for new circle members. Plain invite tokens are not shown; usage, expiry, status, and accepted identity metadata are visible.',
-        sql: `SELECT invite_id, created_by, created_at, expires_at, accepted_by_identity_id,
-                     accepted_identity_name, accepted_at, max_uses, used_count, status,
+        description: 'Registration invites for new circle members. Plain invite tokens are not shown; usage, expiry, and status are visible. Acceptances are listed separately.',
+        sql: `SELECT invite_id, created_by, created_at, expires_at, max_uses, used_count, status,
                      token IS NOT NULL AS has_invite_token
               FROM invites
               WHERE family_id = $1
@@ -248,7 +247,7 @@ router.get('/access', requireInspectorSession, async (req: InspectorRequest, res
         table: 'invite_acceptances',
         title: 'Invite acceptances',
         description: 'Audit trail of identities that accepted member invites.',
-        sql: `SELECT invite_id, accepted_by_identity_id, accepted_identity_name,
+        sql: `SELECT invite_id, accepted_by_identity_id,
                      accepted_by_public_key IS NOT NULL AS has_public_key,
                      accepted_at
               FROM invite_acceptances
@@ -261,28 +260,15 @@ router.get('/access', requireInspectorSession, async (req: InspectorRequest, res
         table: 'direct_guest_links',
         title: 'Direct guest links',
         description: 'Secret-protected links that allow outside guests to message, call, or transfer files with a host. Link secrets and encrypted secrets are not shown.',
-        sql: `SELECT link_id, host_identity_id, created_by_identity_id, status, title,
+        sql: `SELECT link_id, host_identity_id, created_by_identity_id, status,
                      can_message, can_call, can_direct_file_transfer, max_uses,
                      created_at, updated_at, revoked_at,
                      secret_hash IS NOT NULL AS has_secret_hash,
                      encrypted_secret IS NOT NULL AS has_encrypted_secret,
-                     presentation_title, presentation_image_url IS NOT NULL AS has_presentation_image
+                     presentation_image_url IS NOT NULL AS has_presentation_image
               FROM direct_guest_links
               WHERE family_id = $1
               ORDER BY created_at DESC
-              LIMIT 200`,
-        values: [familyId]
-      }),
-      tableBlock({
-        table: 'direct_guest_link_defaults',
-        title: 'Guest link presentation defaults',
-        description: 'Default title/description/image metadata used when a host creates direct guest links.',
-        sql: `SELECT host_identity_id, presentation_title, presentation_description,
-                     presentation_image_url IS NOT NULL AS has_presentation_image,
-                     updated_at
-              FROM direct_guest_link_defaults
-              WHERE family_id = $1
-              ORDER BY updated_at DESC
               LIMIT 200`,
         values: [familyId]
       }),
@@ -302,7 +288,7 @@ router.get('/access', requireInspectorSession, async (req: InspectorRequest, res
         table: 'device_enrollments',
         title: 'Device enrollment requests',
         description: 'Requests for adding a new trusted device. Encrypted membership/device payloads are represented only as presence flags.',
-        sql: `SELECT enrollment_id, requested_contact, new_device_id, origin, origin_verified,
+        sql: `SELECT enrollment_id, new_device_id, origin, origin_verified,
                      request_ip, request_user_agent, state, approved_by_device_id,
                      created_at, expires_at, approved_at, consumed_at, trusted_read_at,
                      encrypted_temporary_membership IS NOT NULL AS has_encrypted_temporary_membership,
@@ -414,10 +400,10 @@ router.get('/storage', requireInspectorSession, async (req: InspectorRequest, re
       tableBlock({
         table: 'attachment_blobs',
         title: 'Attachment blobs',
-        description: 'Server-side records for encrypted uploaded files. File names, MIME type, sizes, status, and retention metadata are visible; blob ciphertext is not returned.',
-        sql: `SELECT blob_id, uploader_identity_id, chat_type, chat_id, sender_identity_id,
+        description: 'Server-side records for encrypted uploaded files. Routing, sizes, status, retention metadata, and ciphertext digest state are visible; blob ciphertext is not returned.',
+        sql: `SELECT blob_id, uploader_identity_id, blob_purpose, chat_type, chat_id, sender_identity_id,
                      linked_message_id, original_file_name, mime_type, plaintext_size_bytes,
-                     ciphertext_size_bytes, plaintext_sha256 IS NOT NULL AS has_plaintext_hash,
+                     ciphertext_size_bytes, ciphertext_sha256 IS NOT NULL AS has_ciphertext_hash,
                      storage_key IS NOT NULL AS has_storage_key, status, expires_at,
                      committed_at, deleted_at, deleted_by_identity_id, delete_reason,
                      created_at, updated_at
@@ -444,7 +430,7 @@ router.get('/storage', requireInspectorSession, async (req: InspectorRequest, re
       tableBlock({
         table: 'circle_file_access',
         title: 'Circle file access grants',
-        description: 'Which file blobs belong to this circle, commonly for unencrypted/public assets such as avatars.',
+        description: 'Which file blobs belong to this Circle, including opaque encrypted avatar blobs and explicitly public site assets.',
         sql: `SELECT access_id, blob_id, purpose, granted_at
               FROM circle_file_access
               WHERE family_id = $1

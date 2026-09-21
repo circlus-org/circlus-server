@@ -26,6 +26,7 @@ import { configService } from './configService';
 import { sendDirectChatWsEvent } from '../ws/wsGateway';
 import { query } from '../db';
 import { getFeaturePolicyRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getSelfChatSenderDeviceId } from './directMessageDeviceMetadata';
 import { getRequestLogger } from '../middleware/requestContext';
 import { validateDirectMessageAuthorClaim } from './directMessageTrustProtocol';
 import { recordForegroundMessageActivity } from './foregroundPresenceActivity';
@@ -206,7 +207,11 @@ export async function sendDirectMessage(params: {
   const createdAt = Date.now();
   getRequestLogger({ subsystem: 'direct_messages' }).debug('direct_message_send_started', {
     senderIdentityId: params.senderIdentityId,
-    senderDeviceId: params.senderDeviceId,
+    senderDeviceId: getSelfChatSenderDeviceId(
+      params.senderIdentityId,
+      recipientIdentityId,
+      params.senderDeviceId
+    ),
     recipientIdentityId,
     clientMessageId,
     serverMessageId,
@@ -292,6 +297,7 @@ export async function sendDirectMessage(params: {
     serverMessageId,
     senderIdentityId: params.senderIdentityId,
     recipientIdentityId,
+    senderDeviceId: params.senderDeviceId,
     senderIdentityPublicKey,
     senderIdentityName,
     senderIdentityRole,
@@ -505,6 +511,11 @@ export async function editDirectMessage(params: {
     serverMessageId: message.server_message_id,
     senderIdentityId: message.sender_identity_id,
     recipientIdentityId: message.recipient_identity_id,
+    senderDeviceId: getSelfChatSenderDeviceId(
+      message.sender_identity_id,
+      message.recipient_identity_id,
+      message.sender_device_id
+    ),
     senderIdentityPublicKey: buildSenderPublicKey(senderIdentity),
     senderIdentityName: await resolvePublishedIdentityName(params.familyId, senderIdentity),
     ciphertext,
@@ -576,6 +587,11 @@ export async function deleteDirectMessage(params: {
     serverMessageId: message.server_message_id,
     senderIdentityId: message.sender_identity_id,
     recipientIdentityId: message.recipient_identity_id,
+    senderDeviceId: getSelfChatSenderDeviceId(
+      message.sender_identity_id,
+      message.recipient_identity_id,
+      message.sender_device_id
+    ),
     senderIdentityPublicKey: buildSenderPublicKey(senderIdentity),
     senderIdentityName: await resolvePublishedIdentityName(params.familyId, senderIdentity),
     ciphertext: '',
@@ -726,6 +742,11 @@ export async function fetchDirectMessageSync(params: {
     serverMessageId: message.server_message_id,
     senderIdentityId: message.sender_identity_id,
     recipientIdentityId: message.recipient_identity_id,
+    senderDeviceId: getSelfChatSenderDeviceId(
+      message.sender_identity_id,
+      message.recipient_identity_id,
+      message.sender_device_id
+    ),
     senderIdentityPublicKey: senderKeysById.get(message.sender_identity_id),
     senderIdentityRole: senderRolesById.get(message.sender_identity_id),
     ciphertext: message.ciphertext,

@@ -2,17 +2,13 @@ import { pool } from '../index';
 import type { PoolClient } from 'pg';
 import type { DeviceId, IdentityId } from '@shared/types';
 
-import type {
-  FindByDeviceIdResult,
-  CreateDeviceParams,
-} from './deviceRepository.queries';
+import type { FindByDeviceIdResult } from './deviceRepository.queries';
 
 import {
   findByDeviceId,
   findByPublicKey,
   findByIdentityId,
   findActiveByIdentityId,
-  createDevice,
   updateStatus,
   countByIdentityId,
   countDevices,
@@ -80,32 +76,23 @@ export class DeviceRepository {
     encryptionPublicKeyAlgorithm?: 'x25519' | null;
     encryptionPublicKeyValue?: string | null;
     registrationAttestation?: unknown | null;
-    label?: string | null;
     webOrigin?: string | null;
     encryptedPhysicalDeviceId?: unknown | null;
   }, client?: PoolClient): Promise<FindByDeviceIdResult> {
-    const params = {
-      familyId: data.familyId,
-      deviceId: data.deviceId,
-      identityId: data.identityId,
-      publicKeyAlgorithm: data.publicKeyAlgorithm,
-      publicKeyValue: data.publicKeyValue,
-      encryptionPublicKeyAlgorithm: data.encryptionPublicKeyAlgorithm ?? null,
-      encryptionPublicKeyValue: data.encryptionPublicKeyValue ?? null,
-      registrationAttestation: data.registrationAttestation ? JSON.stringify(data.registrationAttestation) : null,
-      label: data.label ?? null,
-      webOrigin: data.webOrigin ?? null,
-      encryptedPhysicalDeviceId: data.encryptedPhysicalDeviceId ? JSON.stringify(data.encryptedPhysicalDeviceId) : null,
-    } as CreateDeviceParams & {
-      familyId: string;
-      encryptionPublicKeyAlgorithm: 'x25519' | null;
-      encryptionPublicKeyValue: string | null;
-      registrationAttestation: string | null;
-      webOrigin: string | null;
-      encryptedPhysicalDeviceId: string | null;
-    };
-    const results = await createDevice.run(params as any, client || pool);
-    return results[0];
+    const result = await (client || pool).query<FindByDeviceIdResult>(
+      `INSERT INTO devices (
+         device_id, identity_id, family_id, public_key_algorithm, public_key_value,
+         encryption_public_key_algorithm, encryption_public_key_value,
+         registration_attestation, web_origin, encrypted_physical_device_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb)
+       RETURNING *`,
+      [data.deviceId, data.identityId, data.familyId, data.publicKeyAlgorithm, data.publicKeyValue,
+        data.encryptionPublicKeyAlgorithm ?? null, data.encryptionPublicKeyValue ?? null,
+        data.registrationAttestation ? JSON.stringify(data.registrationAttestation) : null,
+        data.webOrigin ?? null,
+        data.encryptedPhysicalDeviceId ? JSON.stringify(data.encryptedPhysicalDeviceId) : null]
+    );
+    return result.rows[0];
   }
 
   /**
@@ -144,41 +131,6 @@ export class DeviceRepository {
           AND event.payload->>'deviceId' = $1`,
       [deviceId, familyId, webOrigin ?? null]
     );
-  }
-
-  async updateLabel(params: {
-    familyId: string;
-    identityId: IdentityId;
-    deviceId: DeviceId;
-    label: string | null;
-    updateId: string;
-  }): Promise<{ device_id: string; label: string | null; label_update_id: string; applied: boolean } | null> {
-    const result = await pool.query<{
-      device_id: string;
-      label: string | null;
-      label_update_id: string;
-      applied: boolean;
-    }>(
-      `WITH updated AS (
-         UPDATE devices
-         SET label = $4, label_update_id = $5
-         WHERE family_id = $1
-           AND identity_id = $2
-           AND device_id = $3
-           AND status = 'active'
-           AND label_update_id < $5
-         RETURNING device_id, label, label_update_id
-       )
-       SELECT device_id, label, label_update_id, TRUE AS applied FROM updated
-       UNION ALL
-       SELECT device_id, label, label_update_id, FALSE AS applied
-       FROM devices
-       WHERE family_id = $1 AND identity_id = $2 AND device_id = $3 AND status = 'active'
-         AND NOT EXISTS (SELECT 1 FROM updated)
-       LIMIT 1`,
-      [params.familyId, params.identityId, params.deviceId, params.label, params.updateId]
-    );
-    return result.rows[0] || null;
   }
 
   /**

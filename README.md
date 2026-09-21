@@ -302,6 +302,44 @@ After the server is running, create circles from the Server Management page
 using a short-lived server-admin claim token. The server stores circle/domain
 mappings in PostgreSQL and uses them to route API and WebSocket requests.
 
+### Emergency deletion after complete identity loss
+
+If every device holding a Circle owner identity has been lost, SSH access can
+delete that Circle without resetting the other Circles or the whole database.
+List all Circles and their current domains, identifiers, status, member and
+guest counts, total identities, and active device counts:
+
+```bash
+docker compose --env-file deploy/.env --profile local-turn exec server \
+  npm run tenant:list:prod
+```
+
+Use `npm run tenant:list:prod -- --json` inside the container when
+machine-readable output is preferable. The next command only inspects the
+selected target:
+
+```bash
+docker compose --env-file deploy/.env --profile local-turn exec server \
+  npm run tenant:delete:prod -- --host=circle.example.com
+```
+
+Copy the reported `Family ID`, then repeat the command with explicit
+confirmation. If multiple Circles share the host, the inspection command also
+requires `--family-id=THE_SELECTED_FAMILY_ID` and refuses to choose one
+automatically:
+
+```bash
+docker compose --env-file deploy/.env --profile local-turn exec server \
+  npm run tenant:delete:prod -- --host=circle.example.com \
+  --family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND \
+  --confirm-family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND
+```
+
+Deletion is irreversible and removes all server-side data for that Circle,
+including any server-admin grant carried by one of its identities. Other
+Circles remain intact. Reusing the domain creates a new Circle with new
+identifiers, keys, and membership history.
+
 ## First Circle Provisioning
 
 The Docker or manual setup only starts the empty server. A Circle is created

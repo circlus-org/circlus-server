@@ -22,14 +22,13 @@ import {
 } from '../../../shared/callLinkInvitation';
 
 const router = Router();
-const CALL_LINK_TITLE_MAX_LENGTH = 120;
 const CALL_LINK_TTL_MIN_HOURS = 1;
 const CALL_LINK_TTL_MAX_HOURS = 365 * 24;
 
 function serializeOwnedCallLink(row: Awaited<ReturnType<typeof callLinkRepository.findOwned>>[number]) {
   return {
     callLinkId: row.call_link_id,
-    title: row.title,
+    title: null,
     status: row.status,
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
@@ -42,7 +41,6 @@ function serializeOwnedCallLink(row: Awaited<ReturnType<typeof callLinkRepositor
     encryptedSecret: row.encrypted_secret,
     joinInvite: row.join_invite_id ? {
       inviteId: row.join_invite_id,
-      title: row.join_invite_title,
       status: row.join_invite_status,
       expiresAt: row.join_invite_expires_at?.toISOString() ?? null,
     } : null,
@@ -84,7 +82,7 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
     }
 
     const payload = getSignedPayload<{
-      title?: unknown;
+      privateMetadataCiphertext?: unknown;
       ttlHours?: unknown;
       expiresAt?: unknown;
       suggestJoinAfterCall?: boolean;
@@ -94,15 +92,23 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
       encryptedSecret?: unknown;
       attachedInvitationKind?: CallLinkAttachedInvitationKind | null;
       directGuestCapabilityDescriptor?: LinkCapabilityDescriptor;
-      directGuestPresentationTitle?: unknown;
+      directGuestHostNameCiphertext?: unknown;
     }>(req);
-    const title = typeof payload.title === 'string' ? payload.title.trim() : '';
-    if (!title || title.length > CALL_LINK_TITLE_MAX_LENGTH) {
+    const privateMetadata = payload.privateMetadataCiphertext && typeof payload.privateMetadataCiphertext === 'object'
+      ? payload.privateMetadataCiphertext as Record<string, unknown>
+      : null;
+    if (
+      !privateMetadata
+      || privateMetadata.cipher !== 'aes-256-gcm'
+      || privateMetadata.version !== 1
+      || typeof privateMetadata.data !== 'string'
+      || typeof privateMetadata.nonce !== 'string'
+    ) {
       return res.status(400).json({
         status: 'error',
         error: {
           code: 'INVALID_REQUEST' as ErrorCode,
-          message: `title is required and must be at most ${CALL_LINK_TITLE_MAX_LENGTH} characters`
+          message: 'Encrypted private call-link metadata is required'
         }
       } as ApiResponse);
     }
@@ -156,7 +162,7 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
       'attachedInvitationKind'
     );
     const expectedScope = {
-      title,
+      privateMetadataCiphertext: payload.privateMetadataCiphertext,
       suggestJoinAfterCall,
       joinMode: suggestJoinAfterCall ? 'single-use' : null,
       ...(descriptorScopeHasCircleName ? { showCircleName } : {}),
@@ -192,7 +198,6 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
     let directGuestInvitation: {
       linkId: string;
       capabilityDescriptor: LinkCapabilityDescriptor;
-      presentationTitle: string | null;
     } | null = null;
     if (attachedInvitationKind === 'direct_guest') {
       if (!getRequestAuthorization(req).createGuestInvites) {
@@ -202,15 +207,12 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
         } as ApiResponse);
       }
       const guestDescriptor = payload.directGuestCapabilityDescriptor;
-      const presentationTitle = typeof payload.directGuestPresentationTitle === 'string'
-        ? payload.directGuestPresentationTitle.trim().slice(0, 160) || null
-        : null;
       const expectedGuestScope = {
-        title,
+        privateMetadataCiphertext: payload.privateMetadataCiphertext,
         permissions: CALL_LINK_DIRECT_GUEST_PERMISSIONS,
         channelId: null,
-        ...(payload.directGuestPresentationTitle !== undefined
-          ? { hostIdentityName: presentationTitle }
+        ...(payload.directGuestHostNameCiphertext !== undefined
+          ? { hostIdentityNameCiphertext: payload.directGuestHostNameCiphertext }
           : {})
       };
       if (
@@ -235,8 +237,7 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
       }
       directGuestInvitation = {
         linkId: `dgl_${nanoid(22)}`,
-        capabilityDescriptor: guestDescriptor,
-        presentationTitle
+        capabilityDescriptor: guestDescriptor
       };
     }
 
@@ -250,7 +251,7 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
       role,
       callLinkId,
       secretHash: descriptor.payload.capabilityId,
-      title,
+      title: null,
       suggestJoinAfterCall,
       expiresAt,
       joinInviteId,
@@ -277,7 +278,7 @@ router.post('/create', verifySignature, requireActiveIdentity, requireFullCircle
       status: 'ok',
       result: {
         callLinkId,
-        title,
+        title: null,
         expiresAt: expiresAt.toISOString(),
         suggestJoinAfterCall: createResult.suggestJoinAfterCall,
         joinInviteId: createResult.joinInviteId,
@@ -445,9 +446,7 @@ router.post('/resolve', async (req, res) => {
     return res.json({
       status: 'ok',
       result: {
-        title: typeof descriptor.payload.scope?.title === 'string'
-          ? descriptor.payload.scope.title.trim() || row.title
-          : row.title,
+        title: null,
         targetIdentityId: targetIdentity.identity_id,
         targetIdentityName: null,
         serverName: descriptor.payload.scope?.showCircleName === false

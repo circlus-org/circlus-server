@@ -20,33 +20,6 @@ WHERE identity_id = :identityId AND status = 'active'
   AND family_id = :familyId
 ORDER BY created_at DESC;
 
-/* @name CreateDevice */
-INSERT INTO devices (
-  device_id,
-  identity_id,
-  family_id,
-  public_key_algorithm,
-  public_key_value,
-  encryption_public_key_algorithm,
-  encryption_public_key_value,
-  registration_attestation,
-  label,
-  web_origin,
-  encrypted_physical_device_id
-) VALUES (
-  :deviceId,
-  :identityId,
-  :familyId,
-  :publicKeyAlgorithm,
-  :publicKeyValue,
-  :encryptionPublicKeyAlgorithm,
-  :encryptionPublicKeyValue,
-  :registrationAttestation,
-  :label,
-  :webOrigin,
-  :encryptedPhysicalDeviceId
-) RETURNING *;
-
 /* @name UpdateStatus */
 UPDATE devices
 SET status = :status

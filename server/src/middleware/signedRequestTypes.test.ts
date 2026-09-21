@@ -79,7 +79,6 @@ describe('HTTP signed operation contract', () => {
   test('distinguishes reads and writes on the same path and handles literal colons', () => {
     expect(getHttpSignedRequestType('POST', '/api/admin', '/family-config')).toBe('admin:family-config:get');
     expect(getHttpSignedRequestType('PUT', '/api/admin', '/family-config')).toBe('admin:family-config:update');
-    expect(getHttpSignedRequestType('POST', '/api/group-chats', '/:chatId/participants\\:add')).toBe('grp:participants:add');
     expect(getHttpSignedRequestType('DELETE', '/api/admin', '/family-config')).toBeUndefined();
   });
 });

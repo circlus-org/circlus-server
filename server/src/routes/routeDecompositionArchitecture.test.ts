@@ -25,13 +25,13 @@ describe('large route modules stay decomposed by responsibility', () => {
       parent: 'auth.ts',
       child: 'authIdentityLookupRoutes.ts',
       mount: 'authIdentityLookupRoutes',
-      paths: ['/identity/encrypted-key', '/identity/lookup']
+      paths: ['/identity/encrypted-key']
     },
     {
       parent: 'admin.ts',
       child: 'adminConfigRoutes.ts',
       mount: 'adminConfigRoutes',
-      paths: ['/health', '/family-config', '/family-config/upsert']
+      paths: ['/health', '/family-config']
     },
     {
       parent: 'admin.ts',
@@ -40,7 +40,6 @@ describe('large route modules stay decomposed by responsibility', () => {
       paths: [
         '/users',
         '/owner/transfer',
-        '/users/:identityId/role',
         '/users/:identityId/invite-permission',
         '/users/:identityId/disable',
         '/users/:identityId/enable',
@@ -210,7 +209,6 @@ describe('large route modules stay decomposed by responsibility', () => {
   test('key persistence transactions stay outside HTTP handlers', () => {
     const keyRoutes = [
       ['messages.ts', 'claimAndPublishDirectEpochKey'],
-      ['groupChatKeyRoutes.ts', 'claimAndPublishGroupChatEpochKey'],
       ['temporaryAccessChatKeyRoutes.ts', 'storeTemporaryDeviceChatKeyEnvelopes'],
       ['announcementChannelKeyRoutes.ts', 'claimAndPublishAnnouncementChannelEpochKey']
     ] as const;
@@ -219,21 +217,6 @@ describe('large route modules stay decomposed by responsibility', () => {
       expect(routeSource).toContain(serviceCall);
       expect(routeSource).not.toContain('transaction(');
     }
-  });
-
-  test('group chat membership state transitions stay outside HTTP handlers', () => {
-    const membershipRoutes = source('groupChatMembershipRoutes.ts');
-    for (const serviceCall of [
-      'addGroupChatParticipants',
-      'removeGroupChatParticipant',
-      'transferGroupChatOwnership',
-      'leaveGroupChat'
-    ]) {
-      expect(membershipRoutes).toContain(serviceCall);
-    }
-    expect(membershipRoutes).not.toContain('transaction(');
-    expect(membershipRoutes).not.toContain('buildSystemMessageRecord');
-    expect(membershipRoutes).not.toContain('fanoutGroupChatEvent');
   });
 
   test('member identity creation and invite consumption share one service transaction', () => {
@@ -267,7 +250,7 @@ describe('large route modules stay decomposed by responsibility', () => {
       }))
     ));
 
-    expect(routeStarts).toHaveLength(20);
+    expect(routeStarts).toHaveLength(19);
     for (const routeStart of routeStarts) {
       const handlerStart = routeStart.source.indexOf('async (req:', routeStart.index);
       const middlewareChain = routeStart.source.slice(routeStart.index, handlerStart);

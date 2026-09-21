@@ -1,7 +1,7 @@
 import { resolveCallLinkPresentation } from './callSessionPresentation';
 
 describe('resolveCallLinkPresentation', () => {
-  it('recovers the call-link title from the signed capability descriptor', () => {
+  it('classifies a call link without reading its encrypted presentation', () => {
     expect(resolveCallLinkPresentation({
       sdp_offer: JSON.stringify({
         __externalCaller: {
@@ -11,7 +11,7 @@ describe('resolveCallLinkPresentation', () => {
           }
         }
       })
-    })).toEqual({ isTemporaryLinkCall: true, callLinkTitle: 'Support call' });
+    })).toEqual({ isTemporaryLinkCall: true });
   });
 
   it('does not classify an ordinary external call as a call-link call', () => {

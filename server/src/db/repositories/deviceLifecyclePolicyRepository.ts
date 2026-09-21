@@ -58,7 +58,6 @@ export class DeviceLifecyclePolicyRepository {
       device_id: string;
       identity_id: string;
       identity_name: string | null;
-      label: string | null;
       web_origin: string | null;
       created_at: Date;
       last_seen_at: Date | null;
@@ -77,7 +76,7 @@ export class DeviceLifecyclePolicyRepository {
             AND i.status = 'active'
             AND i.role IN ('owner', 'member')
        )
-       SELECT d.device_id, d.identity_id, i.identity_name, d.label, d.web_origin,
+       SELECT d.device_id, d.identity_id, i.identity_name, d.web_origin,
               d.created_at, d.last_seen_at, d.inactivity_warning_sent_at,
               d.inactive_days, d.active_device_count
          FROM active_devices d
@@ -90,7 +89,7 @@ export class DeviceLifecyclePolicyRepository {
       deviceId: row.device_id,
       identityId: row.identity_id,
       identityName: null,
-      label: row.label,
+      label: null,
       webOrigin: row.web_origin,
       createdAt: row.created_at.toISOString(),
       lastSeenAt: row.last_seen_at?.toISOString() || null,
@@ -109,7 +108,6 @@ export class DeviceLifecyclePolicyRepository {
     circleId: string;
     deviceId: string;
     identityId: string;
-    label: string | null;
     lastActivityAt: Date;
     warningSentAt: Date | null;
   }>> {
@@ -118,12 +116,11 @@ export class DeviceLifecyclePolicyRepository {
       circle_id: string;
       device_id: string;
       identity_id: string;
-      label: string | null;
       last_activity_at: Date;
       inactivity_warning_sent_at: Date | null;
     }>(
       `SELECT d.family_id, fc.circle_id, d.device_id, d.identity_id,
-              d.label, COALESCE(d.last_seen_at, d.created_at) AS last_activity_at,
+              COALESCE(d.last_seen_at, d.created_at) AS last_activity_at,
               d.inactivity_warning_sent_at
          FROM devices d
          JOIN family_config fc ON fc.family_id = d.family_id
@@ -147,7 +144,6 @@ export class DeviceLifecyclePolicyRepository {
       circleId: row.circle_id,
       deviceId: row.device_id,
       identityId: row.identity_id,
-      label: row.label,
       lastActivityAt: row.last_activity_at,
       warningSentAt: row.inactivity_warning_sent_at
     }));

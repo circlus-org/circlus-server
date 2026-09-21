@@ -50,5 +50,14 @@ describe('validateQuickReceiveGrant', () => {
   it('rejects an invalid signature', () => {
     expect(validateQuickReceiveGrant({ ...validParams, verify: () => false })).toBe(false);
   });
-});
 
+  it('rejects legacy grants that expose a device label', () => {
+    expect(validateQuickReceiveGrant({
+      ...validParams,
+      grant: {
+        ...grant,
+        payload: { ...grant.payload, targetDeviceLabel: 'Private phone name' }
+      } as QuickReceiveGrant
+    })).toBe(false);
+  });
+});

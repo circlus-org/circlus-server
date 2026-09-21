@@ -136,7 +136,7 @@ export class CallHistoryRepository {
          external_initiator_public_key,
          call_link_title,
          last_updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, 'ringing', $7::jsonb, $8, $6)
+       ) VALUES ($1, $2, $3, $4, $5, $6, 'ringing', $7::jsonb, NULL, $6)
        ON CONFLICT (call_session_id) DO NOTHING`,
       [
         params.callSessionId,
@@ -145,8 +145,7 @@ export class CallHistoryRepository {
         params.targetIdentityId,
         params.isTemporaryLinkCall === true,
         createdAt,
-        params.externalInitiatorPublicKey ? JSON.stringify(params.externalInitiatorPublicKey) : null,
-        params.callLinkTitle || null
+        params.externalInitiatorPublicKey ? JSON.stringify(params.externalInitiatorPublicKey) : null
       ]
     );
   }

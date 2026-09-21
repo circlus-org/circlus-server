@@ -15,6 +15,10 @@ function readPublicInitialSchema(): string {
 
 describe('Public initial database schema', () => {
   const publicInitialSchema = readPublicInitialSchema();
+  const channelPrivacyMigration = fs.readFileSync(
+    path.resolve(process.cwd(), 'db/migrations/012_encrypt_channel_metadata_and_reaction_codes.sql'),
+    'utf8'
+  );
 
   it('supports guest diagnostics and keeps media timing separate from legacy acceptance', () => {
     expect(publicInitialSchema).toContain('media_connected_at bigint');
@@ -108,13 +112,18 @@ describe('Public initial database schema', () => {
     expect(publicInitialSchema).toContain("public_site_state text DEFAULT 'hidden'::text NOT NULL");
   });
 
-  it('keeps guest-link and channel titles at their published privacy boundary', () => {
+  it('keeps the historical baseline compatible and removes its plaintext channel metadata in migration 012', () => {
     expect(publicInitialSchema).toContain(
       "COMMENT ON COLUMN public.direct_guest_links.title IS 'Optional private management label."
     );
     expect(publicInitialSchema).toContain(
       "COMMENT ON COLUMN public.announcement_channels.title IS 'Guest-visible channel title."
     );
+    expect(channelPrivacyMigration).toContain('SET title = NULL');
+    expect(channelPrivacyMigration).toContain('announcement_channels_no_plaintext_metadata');
+    expect(channelPrivacyMigration).toContain('metadata_ciphertext TEXT NULL');
+    expect(channelPrivacyMigration).toContain('RENAME COLUMN emojis TO reaction_codes');
+    expect(channelPrivacyMigration).toContain('TRUNCATE announcement_channel_reactions');
   });
 
   it('stores guest-invite delegation per identity rather than as a global member policy', () => {
@@ -262,7 +271,7 @@ describe('Public initial database schema', () => {
 
   it('keeps deterministic device-label conflict metadata', () => {
     expect(publicInitialSchema).toContain(
-      "label_update_id character varying(128) DEFAULT ''::character varying NOT NULL"
+      "encrypted_physical_device_id jsonb"
     );
   });
 

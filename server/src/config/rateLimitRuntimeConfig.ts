@@ -8,7 +8,6 @@ export type RateLimitRuntimeConfig = {
     registerMax: number;
     registerDeviceMax: number;
     identityEncryptedKeyMax: number;
-    identityLookupMax: number;
   };
   circleMigration: {
     verify: { windowMs: number; max: number };
@@ -24,7 +23,7 @@ export type RateLimitRuntimeConfig = {
   deviceEnrollments: { windowMs: number; createMax: number; payloadMax: number };
   groupChats: { windowMs: number; max: number };
   hostProvisioning: { windowMs: number; max: number };
-  identities: { windowMs: number; publishedMax: number; avatarUploadMax: number };
+  identities: { windowMs: number; directoryMax: number; avatarUploadMax: number };
   links: { windowMs: number; max: number };
   messages: { windowMs: number; max: number };
   push: { windowMs: number; vapidKeyMax: number; mutationsMax: number };
@@ -45,8 +44,7 @@ export function loadRateLimitRuntimeConfig(
       checkInviteMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_CHECK_INVITE_MAX', 30),
       registerMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_REGISTER_MAX', 10),
       registerDeviceMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_REGISTER_DEVICE_MAX', 20),
-      identityEncryptedKeyMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_IDENTITY_ENCRYPTED_KEY_MAX', 30),
-      identityLookupMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_IDENTITY_LOOKUP_MAX', 60)
+      identityEncryptedKeyMax: rateLimitMax(environment, 'RATE_LIMIT_AUTH_IDENTITY_ENCRYPTED_KEY_MAX', 30)
     },
     circleMigration: {
       verify: {
@@ -80,7 +78,7 @@ export function loadRateLimitRuntimeConfig(
     },
     identities: {
       windowMs: rateLimitWindow(environment, 'RATE_LIMIT_IDENTITIES_WINDOW_MS'),
-      publishedMax: rateLimitMax(environment, 'RATE_LIMIT_IDENTITIES_PUBLISHED_MAX', 60),
+      directoryMax: rateLimitMax(environment, 'RATE_LIMIT_IDENTITIES_DIRECTORY_MAX', 60),
       avatarUploadMax: rateLimitMax(environment, 'RATE_LIMIT_IDENTITIES_AVATAR_UPLOAD_MAX', 10)
     },
     links: {

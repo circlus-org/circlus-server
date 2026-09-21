@@ -1,6 +1,5 @@
 import { routeLogger } from '../utils/routeLogger';
 import { Router } from 'express';
-import { nanoid } from 'nanoid';
 import { verifySignature, requireActiveIdentity, requireFullCircleIdentity } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import { groupChatRepository, identityRepository } from '../db/repositories';
@@ -8,17 +7,14 @@ import { GROUP_CHAT_LIMITS, isValidEncryptedGroupTitle } from './groupChatsValid
 import { createRateLimiter, ipFamilyKey } from '../middleware/rateLimit';
 import type { ApiResponse, ErrorCode, GroupStateTransitionClaim, IdentityId, PublicKey } from '../../../shared/types';
 import { getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
-import {
-  requireGroupChatOwner,
-  requireTrustedGroupDevice
-} from './groupChatsAccess';
+import { requireTrustedGroupDevice } from './groupChatsAccess';
 import groupChatKeyRoutes from './groupChatKeyRoutes';
 import groupChatMembershipRoutes from './groupChatMembershipRoutes';
 import groupChatMessageRoutes from './groupChatMessageRoutes';
 import groupChatStateRoutes from './groupChatStateRoutes';
 import { normalizeGroupStateEnvelopes, validateGroupEnvelopeSet } from './groupChatStateRoutes';
 import { validateGroupStateTransition } from './groupChatTrustProtocol';
-import { buildSystemMessageRecord, fanoutGroupChatEvent } from './groupChatRouteSupport';
+import { fanoutGroupChatEvent } from './groupChatRouteSupport';
 
 const router = Router();
 const groupChatRateLimits = getRateLimitRuntimeConfig().groupChats;
@@ -175,55 +171,6 @@ router.post('/list', verifySignature, requireActiveIdentity, requireFullCircleId
     } as ApiResponse);
   } catch (error) {
     routeLogger.error('List group chats error:', error);
-    return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' } } as ApiResponse);
-  }
-});
-
-router.post('/:chatId/rename', verifySignature, requireActiveIdentity, requireFullCircleIdentity, requireTrustedGroupDevice, async (req: AuthRequest, res) => {
-  try {
-    const { chatId } = req.params;
-    const ownerCheck = await requireGroupChatOwner(req, chatId);
-    if (!ownerCheck.ok) return res.status(ownerCheck.status).json(ownerCheck.body);
-
-    const familyId = req.familyId!;
-    const ownerIdentityId = req.device!.identityId;
-    const chat = await groupChatRepository.findChat(familyId, chatId);
-    if (!chat || chat.protocol_version === 2) {
-      return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE' as ErrorCode, message: 'Use an owner-signed group state transition to rename this chat' } } as ApiResponse);
-    }
-    const epoch = chat?.key_epoch || 1;
-    const payload = (req.signedRequest?.payload || {}) as { titleCiphertext?: string };
-    const titleCiphertext = String(payload.titleCiphertext || '').trim();
-    if (!isValidEncryptedGroupTitle(titleCiphertext, epoch)) {
-      return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'titleCiphertext must be encrypted for the current group epoch' } } as ApiResponse);
-    }
-
-    const now = Date.now();
-    await groupChatRepository.renameChat(familyId, chatId, titleCiphertext, now);
-    await groupChatRepository.insertMessage(buildSystemMessageRecord({
-      messageId: `gcm_${nanoid(20)}`,
-      familyId,
-      chatId,
-      senderIdentityId: ownerIdentityId,
-      senderDeviceId: req.device?.deviceId || null,
-      senderSignature: req.signedRequest?.signature || null,
-      createdAt: now,
-      epoch: chat?.key_epoch || 1,
-      systemType: 'chat_renamed',
-      systemPayload: null
-    }));
-
-    const participants = await groupChatRepository.listActiveParticipants(familyId, chatId);
-    fanoutGroupChatEvent({
-      familyId,
-      participantIdentityIds: participants.map((p) => p.identity_id),
-      eventType: 'group:chat-updated',
-      payload: { chatId, event: 'chat_renamed', titleCiphertext }
-    });
-
-    return res.json({ status: 'ok', result: { chatId, titleCiphertext } } as ApiResponse);
-  } catch (error) {
-    routeLogger.error('Rename group chat error:', error);
     return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' } } as ApiResponse);
   }
 });

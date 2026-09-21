@@ -6,8 +6,6 @@ type AttachmentReservationCreateParams = {
   blobId: string;
   familyId: string;
   uploaderIdentityId: string;
-  originalFileName: string;
-  mimeType: string | null;
   plaintextSizeBytes: number;
   storageKey: string;
   expiresAt: Date;
@@ -34,15 +32,13 @@ export class AttachmentRepository {
 
       await client.query(
         `INSERT INTO attachment_blobs (
-           blob_id, family_id, uploader_identity_id, original_file_name, mime_type,
+           blob_id, family_id, uploader_identity_id,
            plaintext_size_bytes, storage_key, status, expires_at, created_at, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'reserved', $8, NOW(), NOW())`,
+         ) VALUES ($1, $2, $3, $4, $5, 'reserved', $6, NOW(), NOW())`,
         [
           params.blobId,
           params.familyId,
           params.uploaderIdentityId,
-          params.originalFileName,
-          params.mimeType,
           params.plaintextSizeBytes,
           params.storageKey,
           params.expiresAt
@@ -119,7 +115,7 @@ export class AttachmentRepository {
     reservationId: string;
     blobId: string;
     ciphertextSizeBytes: number;
-    plaintextSha256: string | null;
+    ciphertextSha256: string | null;
   }): Promise<void> {
     await transaction(async (client) => {
       await client.query(
@@ -136,10 +132,10 @@ export class AttachmentRepository {
         `UPDATE attachment_blobs
          SET status = 'uploaded',
              ciphertext_size_bytes = $3,
-             plaintext_sha256 = COALESCE($4, plaintext_sha256),
+             ciphertext_sha256 = COALESCE($4, ciphertext_sha256),
              updated_at = NOW()
          WHERE family_id = $1 AND blob_id = $2`,
-        [params.familyId, params.blobId, params.ciphertextSizeBytes, params.plaintextSha256]
+        [params.familyId, params.blobId, params.ciphertextSizeBytes, params.ciphertextSha256]
       );
     });
   }
@@ -296,25 +292,27 @@ export class AttachmentRepository {
     blobId: string;
     familyId: string;
     uploaderIdentityId: string;
-    originalFileName: string;
-    mimeType: string;
+    purpose?: 'encrypted_payload' | 'public_presentation';
+    originalFileName?: string | null;
+    mimeType?: string | null;
     sizeBytes: number;
     storageKey: string;
   }): Promise<void> {
     await query(
       `INSERT INTO attachment_blobs (
-         blob_id, family_id, uploader_identity_id, original_file_name, mime_type,
+         blob_id, family_id, uploader_identity_id, blob_purpose, original_file_name, mime_type,
          plaintext_size_bytes, ciphertext_size_bytes, storage_key, status,
          expires_at, committed_at, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, 'committed',
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, 'committed',
          NOW() + INTERVAL '24 hours', NOW(), NOW(), NOW())
        ON CONFLICT (blob_id) DO NOTHING`,
       [
         params.blobId,
         params.familyId,
         params.uploaderIdentityId,
-        params.originalFileName,
-        params.mimeType,
+        params.purpose || 'encrypted_payload',
+        params.originalFileName || null,
+        params.mimeType || null,
         params.sizeBytes,
         params.storageKey,
       ]

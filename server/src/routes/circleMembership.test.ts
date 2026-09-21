@@ -7,6 +7,8 @@ jest.mock('../db', () => ({ query: jest.fn(), transaction: jest.fn() }));
 jest.mock('../middleware/auth', () => ({
   verifySignature: jest.fn((_req, _res, next) => next()),
   requireActiveIdentity: jest.fn((_req, _res, next) => next()),
+  requireFullCircleIdentity: jest.fn((_req, _res, next) => next()),
+  requireAdmin: jest.fn((_req, _res, next) => next()),
   getSignedPayload: jest.fn((req) => req.signedRequest?.payload || {})
 }));
 jest.mock('../services/circleMembershipProofService', () => ({ listCircleIdentityAdmissionProofs: jest.fn() }));
@@ -124,7 +126,8 @@ describe('Circle membership route behavior', () => {
     await handler('/head')(request(), res);
     expect(res.json.mock.calls[0][0].result).toEqual({
       membershipStateId: 'state-1', membershipSequence: 4, profileEpoch: 2,
-      profileEpochCount: 2, profileEnvelopeCount: 5, profileCount: 3, profileRevisionSum: '9'
+      profileEpochCount: 2, profileEnvelopeCount: 5, profileCount: 3, profileRevisionSum: '9',
+      sharedMetadataRevision: 0
     });
     expect(dbQuery.mock.calls[0][1]).toEqual(['family-1']);
 
@@ -149,6 +152,27 @@ describe('Circle membership route behavior', () => {
     expect(membershipStates).toHaveBeenCalledTimes(1);
   });
 
+  it('returns a membership directory without plaintext profile fields', async () => {
+    const proofs = [
+      { identityId: 'alice', publicKey: { algorithm: 'ed25519', value: 'alice-key' }, status: 'active', role: 'owner' },
+      { identityId: 'bob', publicKey: { algorithm: 'ed25519', value: 'bob-key' }, status: 'active', role: 'member' },
+      { identityId: 'guest', publicKey: { algorithm: 'ed25519', value: 'guest-key' }, status: 'active', role: 'guest' },
+      { identityId: 'disabled', publicKey: { algorithm: 'ed25519', value: 'disabled-key' }, status: 'disabled', role: 'member' },
+    ];
+    admissionProofs.mockResolvedValueOnce(proofs);
+    const res = response();
+    await handler('/directory')(request(), res);
+    expect(res.json.mock.calls[0][0].result).toEqual({
+      members: [
+        { identityId: 'alice', publicKey: { algorithm: 'ed25519', value: 'alice-key' } },
+        { identityId: 'bob', publicKey: { algorithm: 'ed25519', value: 'bob-key' } },
+      ],
+      membershipProofs: proofs,
+      membershipStates: [head],
+    });
+    expect(JSON.stringify(res.json.mock.calls[0][0])).not.toContain('identityName');
+  });
+
   it('reads only the requesting identity’s key envelopes and rejects a missing identity', async () => {
     dbQuery
       .mockResolvedValueOnce({ rows: [{ claim: epochClaim }] })
@@ -170,7 +194,7 @@ describe('Circle membership route behavior', () => {
     const denied = response();
     await handler('/profile-state')(request({}, { identity: undefined }), denied);
     expect(denied.status).toHaveBeenCalledWith(400);
-    expect(dbQuery).toHaveBeenCalledTimes(4);
+    expect(dbQuery).toHaveBeenCalledTimes(5);
   });
 
   it('publishes an epoch and its envelopes in one transaction after validating the signer', async () => {
@@ -278,5 +302,9 @@ describe('Circle membership route behavior', () => {
     } }, { circleSuspended: true }), rejected);
     expect(rejected.status).toHaveBeenCalledWith(423);
     expect(inTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose the retired legacy V1 replacement endpoint', () => {
+    expect(router.stack.some((item: any) => item.route?.path === '/state/replace-legacy-v1')).toBe(false);
   });
 });

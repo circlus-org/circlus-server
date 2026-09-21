@@ -189,7 +189,7 @@ export class PublicSiteGeneratorService {
 
       const channel: SiteChannel = {
         slug: announcementChannel.public_site_slug,
-        title: announcementChannel.public_site_intro_title || announcementChannel.title || config.siteTitle,
+        title: announcementChannel.public_site_intro_title || config.siteTitle,
         introText: announcementChannel.public_site_intro_text || announcementChannel.description || null,
         introImageUrl: normalizeSelfHostedPublicSiteImageUrl(
           announcementChannel.public_site_intro_image_url

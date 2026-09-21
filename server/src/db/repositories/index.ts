@@ -22,13 +22,13 @@ export * from './circleInspectorRepository';
 export * from './mobileNotificationRepository';
 export * from './directGuestLinkRepository';
 export * from './directGuestRegistrationRepository';
+export * from './circleOwnerGuestTreeRepository';
 export * from './announcementChannelRepository';
 export * from './announcementChannelPushOutboxRepository';
 
 export * from './groupChatRepository';
 export * from './serverAdminRepository';
 export * from './tenantOwnerClaimsRepository';
-export * from './circleOwnerRecoveryRepository';
 export * from './deviceEnrollmentRepository';
 export * from './callLinkRepository';
 export * from './directGuestPublicRepository';

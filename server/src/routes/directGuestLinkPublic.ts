@@ -115,11 +115,10 @@ router.post('/resolve', async (req, res) => {
     const effectiveLink = hostIdentity?.role === 'member' && familyConfig.membersCanUseGuestServerAttachments === false
       ? withoutGuestServerAttachments(link)
       : link;
-    const defaults = await directGuestLinkRepository.getDefaults(familyId, link.host_identity_id);
     const presentation = {
-      title: link.presentation_title || defaults?.presentation_title || null,
-      description: link.presentation_description || defaults?.presentation_description || null,
-      imageUrl: link.presentation_image_url || defaults?.presentation_image_url || null,
+      title: null,
+      description: null,
+      imageUrl: link.presentation_image_url || null,
     };
     const invitationChannel = link.auto_subscribe_to_channel
       ? await announcementChannelRepository.findByLink(familyId, link.link_id)
@@ -134,8 +133,8 @@ router.post('/resolve', async (req, res) => {
         channelInvitation: invitationChannel?.status === 'active'
           ? {
               channelId: invitationChannel.channel_id,
-              title: invitationChannel.title,
-              description: invitationChannel.description,
+              title: null,
+              description: null,
             }
           : null,
         hostIdentityId: link.host_identity_id,

@@ -14,16 +14,14 @@ import type {
   ApiResponse,
   ErrorCode,
   IdentityId,
-  RevokeDevicePayload,
-  UpdateDeviceLabelRequest,
-  UpdateDeviceLabelResponse
+  RevokeDevicePayload
 } from '../../../shared/types';
-import { sendToIdentityWs } from '../ws/wsGateway';
 import { resolveDirectCommunicationAccess } from '../services/directGuestAccessService';
 import {
   IdentityDeviceRevocationError,
   revokeIdentityDevice
 } from '../services/deviceRevocationService';
+import { sendToIdentityWs } from '../ws/wsGateway';
 
 const router = Router();
 const QUICK_RECEIVE_CONTROL_MAX_BYTES = 64 * 1024;
@@ -79,8 +77,6 @@ router.post('/list', verifySignature, requireActiveIdentity, requireOwnDeviceMan
           }
         : null,
       registrationAttestation: (device as any).registration_attestation || null,
-      label: device.label,
-      labelUpdateId: (device as { label_update_id?: string }).label_update_id || '',
       webOrigin: (device as any).web_origin || null,
       encryptedPhysicalDeviceId: (device as any).encrypted_physical_device_id || null,
       createdAt: device.created_at.toISOString(),
@@ -116,66 +112,6 @@ router.post('/list', verifySignature, requireActiveIdentity, requireOwnDeviceMan
         code: 'INTERNAL_ERROR' as ErrorCode,
         message: 'Internal server error'
       }
-    } as ApiResponse);
-  }
-});
-
-router.post('/label', verifySignature, requireActiveIdentity, requireOwnDeviceManagement, async (req: AuthRequest<UpdateDeviceLabelRequest>, res) => {
-  try {
-    const familyId = req.familyId;
-    const identityId = req.device!.identityId;
-    const payload = getSignedPayload<UpdateDeviceLabelRequest>(req);
-    const deviceId = String(payload.deviceId || '').trim();
-    const updateId = String(payload.updateId || '').trim();
-    const label = String(payload.label || '').trim().slice(0, 80) || null;
-    if (
-      !familyId
-      || !deviceId
-      || !/^[0-9a-z]{10}:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updateId)
-    ) {
-      return res.status(400).json({
-        status: 'error',
-        error: { code: 'INVALID_STATE' as ErrorCode, message: 'Invalid device label update' }
-      } as ApiResponse);
-    }
-    const updated = await deviceRepository.updateLabel({
-      familyId,
-      identityId,
-      deviceId,
-      label,
-      updateId
-    });
-    if (!updated) {
-      return res.status(404).json({
-        status: 'error',
-        error: { code: 'NOT_FOUND' as ErrorCode, message: 'Device not found' }
-      } as ApiResponse);
-    }
-    if (updated.applied) {
-      sendToIdentityWs(familyId, identityId, {
-        type: 'device:label-updated',
-        data: {
-          deviceId: updated.device_id,
-          label: updated.label,
-          updateId: updated.label_update_id
-        },
-        timestamp: Date.now()
-      });
-    }
-    return res.json({
-      status: 'ok',
-      result: {
-        deviceId: updated.device_id,
-        label: updated.label,
-        updateId: updated.label_update_id,
-        applied: updated.applied
-      }
-    } as ApiResponse<UpdateDeviceLabelResponse>);
-  } catch (error) {
-    routeLogger.error('Update device label error:', error);
-    return res.status(500).json({
-      status: 'error',
-      error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }
     } as ApiResponse);
   }
 });

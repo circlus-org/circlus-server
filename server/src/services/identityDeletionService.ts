@@ -230,6 +230,8 @@ export async function deleteIdentityDataFromCircle(params: {
     await client.query(`DELETE FROM group_chat_reads WHERE family_id = $1 AND identity_id = $2`, [params.familyId, params.identityId]);
     await client.query(`DELETE FROM group_chat_participants WHERE family_id = $1 AND identity_id = $2`, [params.familyId, params.identityId]);
     await client.query(`DELETE FROM circle_encrypted_identity_profiles WHERE family_id = $1 AND owner_identity_id = $2`, [params.familyId, params.identityId]);
+    await client.query(`DELETE FROM circle_encrypted_identity_statuses WHERE family_id = $1 AND owner_identity_id = $2`, [params.familyId, params.identityId]);
+    await client.query(`DELETE FROM circle_encrypted_shared_metadata WHERE family_id = $1 AND owner_identity_id = $2`, [params.familyId, params.identityId]);
     await client.query(`DELETE FROM circle_profile_epoch_envelopes WHERE family_id = $1 AND recipient_identity_id = $2`, [params.familyId, params.identityId]);
     await client.query(
       `UPDATE group_chats AS chat
@@ -315,15 +317,6 @@ export async function deleteIdentityDataFromCircle(params: {
     await client.query(`DELETE FROM direct_guest_link_defaults WHERE family_id = $1 AND host_identity_id = $2`, [params.familyId, params.identityId]);
 
     await client.query(`DELETE FROM invite_acceptances WHERE family_id = $1 AND accepted_by_identity_id = $2`, [params.familyId, params.identityId]);
-    await client.query(
-      `UPDATE invites
-          SET accepted_by_identity_id = NULL,
-              accepted_by_public_key = NULL,
-              accepted_identity_name = NULL,
-              accepted_at = NULL
-        WHERE family_id = $1 AND accepted_by_identity_id = $2`,
-      [params.familyId, params.identityId]
-    );
     await client.query(`DELETE FROM invites WHERE family_id = $1 AND created_by = $2`, [params.familyId, params.identityId]);
     await client.query(`DELETE FROM system_events WHERE family_id = $1 AND (recipient_identity_id = $2 OR payload::text LIKE $3)`, [params.familyId, params.identityId, `%${params.identityId}%`]);
 

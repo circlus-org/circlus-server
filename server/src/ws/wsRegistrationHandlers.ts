@@ -620,7 +620,6 @@ export class WsRegistrationHandlers {
             ? String(admission.callLinkId || '').trim()
             : `whitelist:${declaredIdentityId}`,
           targetIdentityId,
-          callLinkTitle: callLinkGrant?.title || undefined,
           capabilityGrant: callLinkGrant?.descriptor && callLinkGrant.proof
             ? { descriptor: callLinkGrant.descriptor, proof: callLinkGrant.proof }
             : undefined

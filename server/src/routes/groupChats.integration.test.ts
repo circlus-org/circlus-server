@@ -16,7 +16,6 @@ jest.mock('../db/repositories', () => ({
   groupChatRepository: {
     findParticipant: jest.fn(),
     findChat: jest.fn(),
-    bumpKeyEpochIfStale: jest.fn(),
     findKeyEnvelopeForIdentity: jest.fn(),
     findByClientMessageId: jest.fn(),
     findMessageById: jest.fn(),
@@ -25,9 +24,6 @@ jest.mock('../db/repositories', () => ({
     insertMessage: jest.fn(),
     editMessage: jest.fn(),
     softDeleteMessage: jest.fn(),
-    addParticipants: jest.fn(),
-    removeParticipant: jest.fn(),
-    bumpKeyEpoch: jest.fn(),
     listActiveParticipants: jest.fn(),
     listActiveParticipantsWithIdentityKeys: jest.fn(),
     listKeyEnvelopeIdentityIds: jest.fn()
@@ -162,8 +158,6 @@ describe('group chats route integration (send guards)', () => {
 
     (groupChatRepository.findParticipant as jest.Mock).mockResolvedValue({ is_active: true });
     (groupChatRepository.findChat as jest.Mock).mockResolvedValue({ key_epoch: 3, protocol_version: 2 });
-    (groupChatRepository.bumpKeyEpochIfStale as jest.Mock).mockResolvedValue({ bumped: false, keyEpoch: 3 });
-    (groupChatRepository.bumpKeyEpoch as jest.Mock).mockResolvedValue(4);
     (groupChatRepository.findByClientMessageId as jest.Mock).mockResolvedValue(null);
     (groupChatRepository.findLatestSystemMessageBySenderAndType as jest.Mock).mockResolvedValue(null);
     (groupChatRepository.listStateTransitions as jest.Mock).mockResolvedValue([]);
@@ -582,98 +576,5 @@ describe('group chats route integration (send guards)', () => {
     }));
   });
 
-  test('rejects adding guest identities to group chats', async () => {
-    payload = { participantIds: ['guest1'] };
-    (groupChatRepository.findChat as jest.Mock).mockResolvedValue({ owner_identity_id: 'u1', key_epoch: 3 });
-    (identityRepository.findByIdentityIds as jest.Mock).mockResolvedValue([{
-        identity_id: 'guest1',
-        status: 'active',
-        role: 'guest'
-      }]);
 
-    await withServer(async (request) => {
-      const res = await request('/api/group-chats/g1/participants:add', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      expect(res.status).toBe(400);
-      const json = await res.json();
-      expect(json.error.message).toContain('Participant is invalid');
-    });
-
-    expect(groupChatRepository.addParticipants).not.toHaveBeenCalled();
-  });
-
-  test('adds participants and rotates the group epoch in the same transaction', async () => {
-    payload = { participantIds: ['u2'] };
-    (groupChatRepository.findChat as jest.Mock).mockResolvedValue({ owner_identity_id: 'u1', key_epoch: 3 });
-    (identityRepository.findByIdentityIds as jest.Mock).mockResolvedValue([{
-      identity_id: 'u2',
-      status: 'active',
-      role: 'member'
-    }]);
-    (groupChatRepository.addParticipants as jest.Mock).mockResolvedValue(['u2']);
-    (groupChatRepository.bumpKeyEpoch as jest.Mock).mockResolvedValue(4);
-    (groupChatRepository.insertMessage as jest.Mock).mockResolvedValue({ chat_seq: 1 });
-
-    await withServer(async (request) => {
-      const res = await request('/api/group-chats/g1/participants:add', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.result).toEqual({ chatId: 'g1', addedParticipantIds: ['u2'], keyEpoch: 4 });
-    });
-
-    const transactionClient = expect.anything();
-    expect(groupChatRepository.addParticipants).toHaveBeenCalledWith(
-      'f1', 'g1', 'u1', ['u2'], expect.any(Number), transactionClient
-    );
-    expect(groupChatRepository.bumpKeyEpoch).toHaveBeenCalledWith('f1', 'g1', transactionClient);
-    expect(groupChatRepository.insertMessage).toHaveBeenCalledWith(expect.objectContaining({ epoch: 4 }), transactionClient);
-  });
-
-  test('removes a non-owner participant from a group chat', async () => {
-    payload = { participantId: 'u2' };
-    (groupChatRepository.findChat as jest.Mock).mockResolvedValue({ owner_identity_id: 'u1', key_epoch: 3 });
-    (groupChatRepository.findParticipant as jest.Mock).mockResolvedValue({ identity_id: 'u2', is_active: true });
-    (groupChatRepository.listActiveParticipants as jest.Mock).mockResolvedValue([{ identity_id: 'u1' }]);
-
-    await withServer(async (request) => {
-      const res = await request('/api/group-chats/g1/participants:remove', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.status).toBe('ok');
-      expect(json.result.removedParticipantId).toBe('u2');
-      expect(json.result.keyEpoch).toBe(4);
-    });
-
-    expect(groupChatRepository.removeParticipant).toHaveBeenCalledWith('f1', 'g1', 'u2', expect.any(Number), expect.anything());
-    expect(groupChatRepository.bumpKeyEpoch).toHaveBeenCalledWith('f1', 'g1', expect.anything());
-  });
-
-  test('rejects removing the group owner as a participant', async () => {
-    payload = { participantId: 'u1' };
-    (groupChatRepository.findChat as jest.Mock).mockResolvedValue({ owner_identity_id: 'u1', key_epoch: 3 });
-
-    await withServer(async (request) => {
-      const res = await request('/api/group-chats/g1/participants:remove', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      expect(res.status).toBe(400);
-      const json = await res.json();
-      expect(json.error.message).toContain('Owner cannot be removed');
-    });
-
-    expect(groupChatRepository.removeParticipant).not.toHaveBeenCalled();
-  });
 });

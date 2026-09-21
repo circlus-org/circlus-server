@@ -63,6 +63,7 @@ export type DirectGuestRegistrationListRecord = DirectGuestRegistrationRecord & 
   guest_identity_name: string | null;
   guest_public_key_algorithm: 'ed25519' | 'x25519' | null;
   guest_public_key_value: string | null;
+  guest_can_create_guest_invites: boolean;
 };
 
 function mapDirectGuestRegistration(
@@ -82,6 +83,7 @@ function mapDirectGuestRegistrationListRow(
     guest_identity_name: row.guest_identity_name,
     guest_public_key_algorithm: row.guest_public_key_algorithm as DirectGuestRegistrationListRecord['guest_public_key_algorithm'],
     guest_public_key_value: row.guest_public_key_value,
+    guest_can_create_guest_invites: row.guest_can_create_guest_invites,
   };
 }
 
@@ -146,7 +148,8 @@ export class DirectGuestRegistrationRepository {
       `SELECT registration.*,
               identity.identity_name AS guest_identity_name,
               identity.public_key_algorithm AS guest_public_key_algorithm,
-              identity.public_key_value AS guest_public_key_value
+              identity.public_key_value AS guest_public_key_value,
+              identity.can_create_guest_invites AS guest_can_create_guest_invites
          FROM direct_guest_registrations registration
          JOIN direct_guest_links link
            ON link.family_id = registration.family_id

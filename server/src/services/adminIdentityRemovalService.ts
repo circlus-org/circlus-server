@@ -160,8 +160,6 @@ export async function removeIdentityFromCircle(params: {
           SET status = 'removed',
               publish_identity = FALSE,
               presence_visible = FALSE,
-              status_text = NULL,
-              status_updated_at = NOW(),
               removed_at = NOW(),
               removed_by_identity_id = $3
         WHERE family_id = $1

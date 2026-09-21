@@ -169,24 +169,6 @@ router.post('/resolve', resolveLimiter, async (req, res) => {
       } as ApiResponse);
     }
 
-    const ownerRecoveryClaim = await query<{ claim_id: string }>(
-      `SELECT claim_id
-         FROM circle_owner_recovery_claims
-        WHERE family_id = $1 AND token_hash = $2
-          AND status = 'pending' AND expires_at > NOW()
-        LIMIT 1`,
-      [familyId, secretHash]
-    );
-    if (ownerRecoveryClaim.rows[0]) {
-      return res.json({
-        status: 'ok',
-        result: {
-          type: 'owner-recovery',
-          payload: { claimId: ownerRecoveryClaim.rows[0].claim_id }
-        }
-      } as ApiResponse);
-    }
-
     const enrollment = await query<{
       bootstrap_payload: unknown;
     }>(

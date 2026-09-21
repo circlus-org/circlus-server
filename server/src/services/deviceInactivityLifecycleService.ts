@@ -21,7 +21,6 @@ export async function runDeviceInactivityLifecycle(now = new Date()): Promise<{ 
       if (!candidate.warningSentAt) {
         const payload = {
           deviceId: candidate.deviceId,
-          deviceLabel: candidate.label,
           inactiveDays: Math.max(0, Math.floor((now.getTime() - candidate.lastActivityAt.getTime()) / DAY_MS)),
           reviewAfterDays: policy.reviewAfterDays,
           autoRevokeAfterDays: policy.autoRevokeAfterDays

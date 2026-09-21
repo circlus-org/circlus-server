@@ -94,6 +94,16 @@ describe('Circle membership owner repair', () => {
       previous: genesis.claim,
     })).toEqual({ ok: false, message: 'Invalid Circle membership state' });
   });
+
+  it('rejects legacy V1 membership transitions', () => {
+    expect(validateCircleMembershipStateTransition({
+      record: record({
+        version: 1,
+        purpose: 'circle-membership-state-v1',
+      } as any),
+      previous: genesis.claim,
+    })).toEqual({ ok: false, message: 'Invalid Circle membership state' });
+  });
 });
 
 describe('Circle membership invite permission transitions', () => {

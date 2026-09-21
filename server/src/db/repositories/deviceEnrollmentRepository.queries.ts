@@ -39,7 +39,6 @@ export interface CreateDeviceEnrollmentResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }
@@ -115,7 +114,6 @@ export interface FindDeviceEnrollmentByEnrollmentIdResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }
@@ -170,7 +168,6 @@ export interface MarkDeviceEnrollmentTrustedReadResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }
@@ -238,7 +235,6 @@ export interface MarkDeviceEnrollmentApprovedResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }
@@ -303,7 +299,6 @@ export interface MarkDeviceEnrollmentRejectedResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }
@@ -358,7 +353,6 @@ export interface MarkDeviceEnrollmentConsumedResult {
   origin_verified: boolean;
   request_ip: string | null;
   request_user_agent: string | null;
-  requested_contact: string | null;
   state: string;
   trusted_read_at: Date | null;
 }

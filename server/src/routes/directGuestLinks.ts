@@ -32,9 +32,6 @@ import type { LinkCapabilityDescriptor, LinkCapabilityMode, LinkCapabilityRevoca
 import { verifyCapabilityDescriptor, verifyCapabilityRevocation } from '../services/linkCapabilityService';
 
 const router = Router();
-const DIRECT_GUEST_LINK_TITLE_MAX_LEN = 120;
-const DIRECT_GUEST_PRESENTATION_TITLE_MAX_LEN = 160;
-const DIRECT_GUEST_PRESENTATION_DESCRIPTION_MAX_LEN = 1200;
 const DIRECT_GUEST_PRESENTATION_IMAGE_URL_MAX_LEN = 1000;
 const PUBLIC_SITE_CHANNEL_SLUG_MAX_LEN = 80;
 const PUBLIC_SITE_CTA_LABEL_MAX_LEN = 80;
@@ -140,15 +137,12 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
       guestCanServerAttachmentsHost?: boolean;
       autoSubscribeToChannel?: boolean;
       channelId?: string | null;
-      newChannelTitle?: string | null;
-      title?: unknown;
+      privateMetadataCiphertext?: unknown;
       mode?: LinkCapabilityMode;
       expiresAt?: string;
       capabilityDescriptor?: LinkCapabilityDescriptor;
       encryptedSecret?: unknown;
-      hostIdentityName?: unknown;
-      presentationTitle?: unknown;
-      presentationDescription?: unknown;
+      hostIdentityNameCiphertext?: unknown;
       presentationImageUrl?: unknown;
       publicSiteVisible?: unknown;
       publicSiteChannelSlug?: unknown;
@@ -161,9 +155,12 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
     const requestedChannelId = autoSubscribeToChannel
       ? normalizeText(payload.channelId, 120)
       : null;
-    const newChannelTitle = autoSubscribeToChannel
-      ? normalizeText(payload.newChannelTitle, 160)
-      : null;
+    if (autoSubscribeToChannel && !requestedChannelId) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'An existing channel is required for channel subscription' }
+      } as ApiResponse);
+    }
     const normalizedPermissions = normalizeDirectGuestPermissions({
       ...payload,
       autoSubscribeToChannel,
@@ -176,19 +173,10 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
           guestCanServerAttachmentsHost: guestServerAttachmentsAllowed ? normalizedPermissions.guestCanServerAttachmentsHost : false,
         }
       : null;
-    const title = typeof payload.title === 'string'
-      ? payload.title.trim() || null
-      : null;
     if (!permissions) {
       return res.status(400).json({
         status: 'error',
         error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'At least one permission must be enabled' }
-      } as ApiResponse);
-    }
-    if (title !== null && title.length > DIRECT_GUEST_LINK_TITLE_MAX_LEN) {
-      return res.status(400).json({
-        status: 'error',
-        error: { code: 'INVALID_REQUEST' as ErrorCode, message: `title is too long (max ${DIRECT_GUEST_LINK_TITLE_MAX_LEN})` }
       } as ApiResponse);
     }
     const mode: LinkCapabilityMode = payload.mode === 'single-use' ? 'single-use' : 'unlimited';
@@ -199,9 +187,19 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
         error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'expiresAt must be within the next 365 days' }
       } as ApiResponse);
     }
-    const presentationTitle = normalizeText(payload.presentationTitle, DIRECT_GUEST_PRESENTATION_TITLE_MAX_LEN);
-    const presentationDescription = normalizeText(payload.presentationDescription, DIRECT_GUEST_PRESENTATION_DESCRIPTION_MAX_LEN);
     const presentationImageUrl = normalizeImageUrl(payload.presentationImageUrl);
+    if (!isEncryptedBlob(payload.privateMetadataCiphertext)) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Encrypted private link metadata is required' }
+      } as ApiResponse);
+    }
+    if (payload.hostIdentityNameCiphertext !== undefined && !isEncryptedBlob(payload.hostIdentityNameCiphertext)) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Encrypted host identity name is invalid' }
+      } as ApiResponse);
+    }
 
     // Public-site fields on /create are honored only for the owner on an eligible
     // domain. Members creating links must not be able to make them public.
@@ -278,11 +276,11 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
     }
     const descriptorPayload = payload.capabilityDescriptor.payload;
     const expectedScope = {
-      title,
+      privateMetadataCiphertext: payload.privateMetadataCiphertext,
       permissions,
       channelId: autoSubscribeToChannel ? requestedChannelId : null,
-      ...(payload.hostIdentityName !== undefined
-        ? { hostIdentityName: normalizeText(payload.hostIdentityName, DIRECT_GUEST_PRESENTATION_TITLE_MAX_LEN) }
+      ...(payload.hostIdentityNameCiphertext !== undefined
+        ? { hostIdentityNameCiphertext: payload.hostIdentityNameCiphertext }
         : {}),
     };
     if (
@@ -317,9 +315,9 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
         hostCanServerAttachmentsGuest: permissions.hostCanServerAttachmentsGuest,
         guestCanServerAttachmentsHost: permissions.guestCanServerAttachmentsHost,
         autoSubscribeToChannel: permissions.autoSubscribeToChannel,
-        title,
-        presentationTitle,
-        presentationDescription,
+        title: null,
+        presentationTitle: null,
+        presentationDescription: null,
         presentationImageUrl,
         maxUses: mode === 'single-use' ? 1 : null,
         capabilityId: descriptorPayload.capabilityId,
@@ -334,8 +332,7 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
         publicSiteIntroImageUrl,
         publicSiteGuestLinkUrl,
       },
-      requestedChannelId,
-      newChannelTitle
+      requestedChannelId
     });
 
     return res.json({
@@ -344,10 +341,10 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
         linkId: created.link_id,
         channelId: announcementChannel?.channel_id || null,
         permissions: mapDirectGuestPermissionsFromDb(created),
-        title: created.title,
+        title: null,
         presentation: {
-          title: created.presentation_title || null,
-          description: created.presentation_description || null,
+          title: null,
+          description: null,
           imageUrl: created.presentation_image_url || null,
         },
         publicSite: {
@@ -446,6 +443,7 @@ router.post('/presentation-image', verifySignature, requireActiveIdentity, relia
       blobId,
       familyId,
       uploaderIdentityId: identityId,
+      purpose: 'public_presentation',
       originalFileName: fileName,
       mimeType,
       sizeBytes: imageBuffer.length,
@@ -539,7 +537,6 @@ router.post('/mine', verifySignature, requireActiveIdentity, async (req: AuthReq
       autoSubscribeLinkIds: links
         .filter((link) => link.status === 'active' && link.auto_subscribe_to_channel)
         .map((link) => link.link_id),
-      defaultTitle: links.find((link) => link.presentation_title)?.presentation_title || null,
     });
     const channelIds = new Map(channelMappings.map((mapping) => [mapping.link_id, mapping.channel_id]));
     return res.json({
@@ -554,10 +551,10 @@ router.post('/mine', verifySignature, requireActiveIdentity, async (req: AuthReq
         capabilityDescriptor: link.capability_descriptor ?? null,
         expiresAt: link.expires_at?.toISOString() || null,
         status: link.status,
-        title: link.title,
+        title: null,
         presentation: {
-          title: link.presentation_title || null,
-          description: link.presentation_description || null,
+          title: null,
+          description: null,
           imageUrl: link.presentation_image_url || null,
         },
         publicSite: {
@@ -578,73 +575,6 @@ router.post('/mine', verifySignature, requireActiveIdentity, async (req: AuthReq
     } as ApiResponse);
   } catch (error) {
     routeLogger.error('List direct guest links error:', error);
-    return res.status(500).json({
-      status: 'error',
-      error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }
-    } as ApiResponse);
-  }
-});
-
-router.post('/defaults', verifySignature, requireActiveIdentity, async (req: AuthRequest, res) => {
-  try {
-    const familyId = req.familyId;
-    const hostIdentityId = req.device?.identityId;
-    if (!familyId || !hostIdentityId) {
-      return res.status(500).json({
-        status: 'error',
-        error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Family context is missing' }
-      } as ApiResponse);
-    }
-    if (!(await requireGuestLinkManagementAccess(req, res))) return;
-
-    const defaults = await directGuestLinkRepository.getDefaults(familyId, hostIdentityId);
-    return res.json({
-      status: 'ok',
-      result: {
-        title: defaults?.presentation_title || null,
-        description: defaults?.presentation_description || null,
-        imageUrl: defaults?.presentation_image_url || null,
-      }
-    } as ApiResponse);
-  } catch (error) {
-    routeLogger.error('Get direct guest link defaults error:', error);
-    return res.status(500).json({
-      status: 'error',
-      error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }
-    } as ApiResponse);
-  }
-});
-
-router.post('/defaults/update', verifySignature, requireActiveIdentity, async (req: AuthRequest, res) => {
-  try {
-    const familyId = req.familyId;
-    const hostIdentityId = req.device?.identityId;
-    if (!familyId || !hostIdentityId) {
-      return res.status(500).json({
-        status: 'error',
-        error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Family context is missing' }
-      } as ApiResponse);
-    }
-    if (!(await requireGuestLinkManagementAccess(req, res))) return;
-
-    const payload = getSignedPayload<{ title?: unknown; description?: unknown; imageUrl?: unknown }>(req);
-    const updated = await directGuestLinkRepository.setDefaults({
-      familyId,
-      hostIdentityId,
-      presentationTitle: normalizeText(payload.title, DIRECT_GUEST_PRESENTATION_TITLE_MAX_LEN),
-      presentationDescription: normalizeText(payload.description, DIRECT_GUEST_PRESENTATION_DESCRIPTION_MAX_LEN),
-      presentationImageUrl: normalizeImageUrl(payload.imageUrl),
-    });
-    return res.json({
-      status: 'ok',
-      result: {
-        title: updated.presentation_title || null,
-        description: updated.presentation_description || null,
-        imageUrl: updated.presentation_image_url || null,
-      }
-    } as ApiResponse);
-  } catch (error) {
-    routeLogger.error('Update direct guest link defaults error:', error);
     return res.status(500).json({
       status: 'error',
       error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }

@@ -11,7 +11,7 @@ type ChannelReactionPayload = {
   postId?: unknown;
   cursor?: unknown;
   revision?: unknown;
-  emojis?: unknown;
+  codes?: unknown;
 };
 export function channelReactionHandler(action: 'list' | 'set' | 'settings' | 'readers') {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -47,35 +47,35 @@ export function channelReactionHandler(action: 'list' | 'set' | 'settings' | 're
         if (action === 'set') {
           if (!validChannelReactionWrite(payload)) throw new Rejected(400,'Invalid reaction set');
           await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([familyId,channelId,postId,actor])]);
-          const previous = (await db.query(`SELECT revision,emojis FROM announcement_channel_reactions
+          const previous = (await db.query(`SELECT revision,reaction_codes FROM announcement_channel_reactions
             WHERE family_id=$1 AND channel_id=$2 AND post_id=$3 AND actor_identity_id=$4`,[familyId,channelId,postId,actor])).rows[0];
           const revision = Number(previous?.revision || 0);
-          const same = revision === payload.revision && JSON.stringify(previous.emojis) === JSON.stringify(payload.emojis);
+          const same = revision === payload.revision && JSON.stringify(previous.reaction_codes) === JSON.stringify(payload.codes);
           if (!same) {
             if (payload.revision !== revision + 1) throw new Rejected(409,'Reaction changed on another device');
-            if (!canReplaceChannelReactions(channel.reactions_enabled, previous?.emojis || [], payload.emojis)) throw new Rejected(403,'New reactions are disabled');
-            await db.query(`INSERT INTO announcement_channel_reactions(family_id,channel_id,post_id,actor_identity_id,revision,emojis)
+            if (!canReplaceChannelReactions(channel.reactions_enabled, previous?.reaction_codes || [], payload.codes)) throw new Rejected(403,'New reactions are disabled');
+            await db.query(`INSERT INTO announcement_channel_reactions(family_id,channel_id,post_id,actor_identity_id,revision,reaction_codes)
               VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(family_id,channel_id,post_id,actor_identity_id)
-              DO UPDATE SET revision=EXCLUDED.revision,emojis=EXCLUDED.emojis`,[familyId,channelId,postId,actor,payload.revision,payload.emojis]);
+              DO UPDATE SET revision=EXCLUDED.revision,reaction_codes=EXCLUDED.reaction_codes`,[familyId,channelId,postId,actor,payload.revision,payload.codes]);
           }
         }
         if (action === 'readers') {
           const cursor = typeof payload.cursor === 'string' ? payload.cursor : '';
-          const rows = (await db.query(`SELECT actor_identity_id,emojis FROM announcement_channel_reactions
-            WHERE family_id=$1 AND channel_id=$2 AND post_id=$3 AND cardinality(emojis)>0 AND actor_identity_id>$4
+          const rows = (await db.query(`SELECT actor_identity_id,reaction_codes FROM announcement_channel_reactions
+            WHERE family_id=$1 AND channel_id=$2 AND post_id=$3 AND cardinality(reaction_codes)>0 AND actor_identity_id>$4
             ORDER BY actor_identity_id LIMIT 51`,[familyId,channelId,postId,cursor])).rows;
-          return { readers: rows.slice(0,50).map(row => ({ identityId: row.actor_identity_id, emojis: row.emojis })),
+          return { readers: rows.slice(0,50).map(row => ({ identityId: row.actor_identity_id, codes: row.reaction_codes })),
             nextCursor: rows.length > 50 ? rows[49].actor_identity_id : null };
         }
         // No other reader's identity, signature or individual selection leaves this endpoint.
         // One SQL snapshot keeps own revision/selection consistent with the counts.
         const states = (await db.query(`WITH counts AS (
-          SELECT post_id,emoji,COUNT(*)::int AS count FROM announcement_channel_reactions,unnest(emojis) AS emoji
-          WHERE family_id=$1 AND channel_id=$2 AND post_id=ANY($3::text[]) GROUP BY post_id,emoji
+          SELECT post_id,code,COUNT(*)::int AS count FROM announcement_channel_reactions,unnest(reaction_codes) AS code
+          WHERE family_id=$1 AND channel_id=$2 AND post_id=ANY($3::text[]) GROUP BY post_id,code
         ), totals AS (
-          SELECT post_id,jsonb_agg(jsonb_build_object('emoji',emoji,'count',count) ORDER BY emoji) AS counts
+          SELECT post_id,jsonb_agg(jsonb_build_object('code',code,'count',count) ORDER BY code) AS counts
           FROM counts GROUP BY post_id
-        ) SELECT p.post_id,COALESCE(own.revision,0) AS revision,COALESCE(own.emojis,ARRAY[]::text[]) AS mine,
+        ) SELECT p.post_id,COALESCE(own.revision,0) AS revision,COALESCE(own.reaction_codes,ARRAY[]::text[]) AS mine,
           COALESCE(totals.counts,'[]'::jsonb) AS counts FROM unnest($3::text[]) AS p(post_id)
           LEFT JOIN announcement_channel_reactions own ON own.family_id=$1 AND own.channel_id=$2
             AND own.post_id=p.post_id AND own.actor_identity_id=$4

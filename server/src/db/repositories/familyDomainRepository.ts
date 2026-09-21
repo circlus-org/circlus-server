@@ -47,6 +47,17 @@ export class FamilyDomainRepository {
     return result.rows[0] || null;
   }
 
+  async listByHost(host: string): Promise<DBFamilyDomain[]> {
+    const result = await query<DBFamilyDomain>(
+      `SELECT *
+       FROM family_domains
+       WHERE host = $1
+       ORDER BY is_current DESC, created_at ASC, family_id ASC`,
+      [host]
+    );
+    return result.rows;
+  }
+
   async findActiveByHost(host: string, circleId?: string | null): Promise<DBFamilyDomain | null> {
     const result = await query<DBFamilyDomain>(
       `SELECT fd.*
@@ -180,7 +191,7 @@ export class FamilyDomainRepository {
        RETURNING *`,
       [data.familyId, data.host, data.publicBaseUrl, data.source || 'provisioning']
     );
-    await query(`DELETE FROM deleted_circle_domains WHERE family_id = $1 AND host = $2`, [data.familyId, data.host]);
+    await query(`DELETE FROM deleted_circle_domains WHERE host = $1`, [data.host]);
     return result.rows[0];
   }
 

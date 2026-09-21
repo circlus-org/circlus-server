@@ -144,7 +144,6 @@ describe('protected avatar fetch', () => {
       status: 'committed',
       uploader_identity_id: 'target_identity',
       storage_key: 'avatars/blob_1',
-      mime_type: 'image/webp',
       plaintext_size_bytes: 1234,
     });
     (attachmentStorageService.readBlob as jest.Mock).mockResolvedValue(stream);

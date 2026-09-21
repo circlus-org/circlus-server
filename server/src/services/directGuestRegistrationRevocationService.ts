@@ -72,7 +72,7 @@ export async function revokeDirectGuestRegistration(params: {
     await pool.query('UPDATE direct_guest_registrations SET revocation_proof = $3::jsonb WHERE family_id = $1 AND registration_id = $2',
       [params.familyId, params.registrationId, JSON.stringify(revocation)]);
 
-    const removedChannels: Array<{ channelId: string; title: string; keyEpoch: number }> = [];
+    const removedChannels: Array<{ channelId: string; keyEpoch: number }> = [];
     for (const channelId of params.removeFromChannelIds) {
       const removed = await announcementChannelRepository.removeSubscriberByAuthor({
         familyId: params.familyId,
@@ -84,7 +84,6 @@ export async function revokeDirectGuestRegistration(params: {
       if (removed && impact) {
         removedChannels.push({
           channelId,
-          title: impact.title,
           keyEpoch: Number(impact.key_epoch || 1)
         });
       }

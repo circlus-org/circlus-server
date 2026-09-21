@@ -22,7 +22,6 @@ jest.mock('../middleware/auth', () => ({
 jest.mock('../db/repositories', () => ({
   inviteRepository: {
     create: jest.fn(),
-    createForMemberWithQuota: jest.fn(),
     findById: jest.fn(),
     findByCreator: jest.fn(),
     revokeOwnedInvite: jest.fn()
@@ -119,7 +118,6 @@ describe('invites guest restrictions', () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(inviteRepository.create).not.toHaveBeenCalled();
-    expect(inviteRepository.createForMemberWithQuota).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       status: 'error',
       error: expect.objectContaining({

@@ -103,7 +103,6 @@ describe('direct guest registration revocation service', () => {
     expect(result.event.recipientIdentityId).toBe('guest-1');
     expect(result.removedChannels).toEqual([{
       channelId: 'channel-1',
-      title: 'Updates',
       keyEpoch: 3
     }]);
   });

@@ -10,7 +10,6 @@ export const ACCESS_OPERATION_PATHS: Readonly<Record<string, string>> = {
   'platform-recovery:revoke-device': '/device-enrollments/platform-recovery/revoke',
   'call-admission:whitelist:add': '/call-admission/whitelist/add',
   'call-admission:whitelist:remove': '/call-admission/whitelist/remove',
-  'admin:user:role': '/admin/users/:identityId/role',
   'admin:user:invite-permission': '/admin/users/:identityId/invite-permission',
   'admin:user:guest-invite-permission': '/admin/users/:identityId/guest-invite-permission',
   'admin:user:disable': '/admin/users/:identityId/disable',

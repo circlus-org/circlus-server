@@ -222,7 +222,7 @@ async function cleanupInactiveInspectorAccess(): Promise<void> {
  * owner's invitation journal and per-creator lifetime summary.
  *
  * Rules:
- * - expire invites with expires_at < NOW(), used_count = 0, accepted_at IS NULL;
+ * - expire invites with expires_at < NOW() and no normalized acceptance;
  * - do not change legacy quota counters; invitation creation is permission-based.
  */
 export async function cleanupExpiredUnacceptedInvites(): Promise<number> {
@@ -237,7 +237,12 @@ export async function cleanupExpiredUnacceptedInvites(): Promise<number> {
             SET status = 'expired'
           WHERE i.expires_at < NOW()
             AND i.used_count = 0
-            AND i.accepted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM invite_acceptances acceptance
+              WHERE acceptance.family_id = i.family_id
+                AND acceptance.invite_id = i.invite_id
+            )
             AND i.status = 'active'
         RETURNING i.invite_id
        )

@@ -5,7 +5,7 @@ export const RELIABLE_OPERATION_TYPES: readonly string[] = [
   'announcement-channels:reactions:settings', 'announcement-channels:create', 'attachments:reserve',
   'circle-site:site-images:reservations:create', 'circle-site:assets:reservations:create',
   'direct-guest-links:presentation-image', 'call:handling-event',
-  'server-admin:owner-recovery:create-claim', 'server-admin:tenant:reissue-owner-claim',
+  'server-admin:tenant:reissue-owner-claim',
   'invites:create', 'call-links:create', 'direct-guest-links:create',
   'platform-recovery:bind-device', 'platform-recovery:revoke-device',
   'mobile:device:delivery-token:register', 'mobile:device:delivery-token:unregister',

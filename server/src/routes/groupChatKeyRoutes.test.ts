@@ -10,7 +10,6 @@ describe('group chat key route boundary', () => {
 
     expect(paths).toEqual([
       '/:chatId/keys/publish',
-      '/:chatId/keys/claim-or-publish',
       '/:chatId/keys/fetch',
       '/:chatId/keys/coverage'
     ]);

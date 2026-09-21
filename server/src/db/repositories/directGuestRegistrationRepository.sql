@@ -41,7 +41,8 @@ INSERT INTO direct_guest_registrations (
 SELECT r.*,
        i.identity_name AS guest_identity_name,
        i.public_key_algorithm AS guest_public_key_algorithm,
-       i.public_key_value AS guest_public_key_value
+       i.public_key_value AS guest_public_key_value,
+       i.can_create_guest_invites AS guest_can_create_guest_invites
 FROM direct_guest_registrations r
 LEFT JOIN identities i
   ON i.family_id = r.family_id AND i.identity_id = r.guest_identity_id

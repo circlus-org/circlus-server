@@ -5,37 +5,6 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 
 export type NumberOrString = number | string;
 
-/** 'CreateGroupChat' parameters type */
-export interface CreateGroupChatParams {
-  chatId?: string | null | void;
-  createdAt?: NumberOrString | null | void;
-  familyId?: string | null | void;
-  ownerIdentityId?: string | null | void;
-  titleCiphertext?: string | null | void;
-  updatedAt?: NumberOrString | null | void;
-}
-
-/** 'CreateGroupChat' return type */
-export type CreateGroupChatResult = void;
-
-/** 'CreateGroupChat' query type */
-export interface CreateGroupChatQuery {
-  params: CreateGroupChatParams;
-  result: CreateGroupChatResult;
-}
-
-const createGroupChatIR: any = {"usedParamSet":{"chatId":true,"familyId":true,"titleCiphertext":true,"ownerIdentityId":true,"createdAt":true,"updatedAt":true},"params":[{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":125,"b":131}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":134,"b":142}]},{"name":"titleCiphertext","required":false,"transform":{"type":"scalar"},"locs":[{"a":145,"b":160}]},{"name":"ownerIdentityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":163,"b":178}]},{"name":"createdAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":181,"b":190}]},{"name":"updatedAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":193,"b":202}]}],"statement":"INSERT INTO group_chats (chat_id, family_id, title_ciphertext, owner_identity_id, created_at, updated_at, key_epoch)\nVALUES (:chatId, :familyId, :titleCiphertext, :ownerIdentityId, :createdAt, :updatedAt, 1)"};
-
-/**
- * Query generated from SQL:
- * ```
- * INSERT INTO group_chats (chat_id, family_id, title_ciphertext, owner_identity_id, created_at, updated_at, key_epoch)
- * VALUES (:chatId, :familyId, :titleCiphertext, :ownerIdentityId, :createdAt, :updatedAt, 1)
- * ```
- */
-export const createGroupChat = new PreparedQuery<CreateGroupChatParams,CreateGroupChatResult>(createGroupChatIR);
-
-
 /** 'InsertGroupChatParticipant' parameters type */
 export interface InsertGroupChatParticipantParams {
   addedByIdentityId?: string | null | void;
@@ -256,38 +225,6 @@ const setGroupChatParticipantMutedIR: any = {"usedParamSet":{"muted":true,"famil
 export const setGroupChatParticipantMuted = new PreparedQuery<SetGroupChatParticipantMutedParams,SetGroupChatParticipantMutedResult>(setGroupChatParticipantMutedIR);
 
 
-/** 'RenameGroupChat' parameters type */
-export interface RenameGroupChatParams {
-  chatId?: string | null | void;
-  familyId?: string | null | void;
-  titleCiphertext?: string | null | void;
-  updatedAt?: NumberOrString | null | void;
-}
-
-/** 'RenameGroupChat' return type */
-export type RenameGroupChatResult = void;
-
-/** 'RenameGroupChat' query type */
-export interface RenameGroupChatQuery {
-  params: RenameGroupChatParams;
-  result: RenameGroupChatResult;
-}
-
-const renameGroupChatIR: any = {"usedParamSet":{"titleCiphertext":true,"updatedAt":true,"familyId":true,"chatId":true},"params":[{"name":"titleCiphertext","required":false,"transform":{"type":"scalar"},"locs":[{"a":42,"b":57}]},{"name":"updatedAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":77,"b":86}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":106,"b":114}]},{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":132,"b":138}]}],"statement":"UPDATE group_chats\nSET title_ciphertext = :titleCiphertext,\n    updated_at = :updatedAt\nWHERE family_id = :familyId\n  AND chat_id = :chatId"};
-
-/**
- * Query generated from SQL:
- * ```
- * UPDATE group_chats
- * SET title_ciphertext = :titleCiphertext,
- *     updated_at = :updatedAt
- * WHERE family_id = :familyId
- *   AND chat_id = :chatId
- * ```
- */
-export const renameGroupChat = new PreparedQuery<RenameGroupChatParams,RenameGroupChatResult>(renameGroupChatIR);
-
-
 /** 'ReactivateGroupChatParticipant' parameters type */
 export interface ReactivateGroupChatParticipantParams {
   addedByIdentityId?: string | null | void;
@@ -357,107 +294,6 @@ const removeGroupChatParticipantIR: any = {"usedParamSet":{"leftAt":true,"family
  * ```
  */
 export const removeGroupChatParticipant = new PreparedQuery<RemoveGroupChatParticipantParams,RemoveGroupChatParticipantResult>(removeGroupChatParticipantIR);
-
-
-/** 'SetGroupChatOwner' parameters type */
-export interface SetGroupChatOwnerParams {
-  chatId?: string | null | void;
-  familyId?: string | null | void;
-  ownerIdentityId?: string | null | void;
-  updatedAt?: NumberOrString | null | void;
-}
-
-/** 'SetGroupChatOwner' return type */
-export type SetGroupChatOwnerResult = void;
-
-/** 'SetGroupChatOwner' query type */
-export interface SetGroupChatOwnerQuery {
-  params: SetGroupChatOwnerParams;
-  result: SetGroupChatOwnerResult;
-}
-
-const setGroupChatOwnerIR: any = {"usedParamSet":{"ownerIdentityId":true,"updatedAt":true,"familyId":true,"chatId":true},"params":[{"name":"ownerIdentityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":43,"b":58}]},{"name":"updatedAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":78,"b":87}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":107,"b":115}]},{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":133,"b":139}]}],"statement":"UPDATE group_chats\nSET owner_identity_id = :ownerIdentityId,\n    updated_at = :updatedAt\nWHERE family_id = :familyId\n  AND chat_id = :chatId"};
-
-/**
- * Query generated from SQL:
- * ```
- * UPDATE group_chats
- * SET owner_identity_id = :ownerIdentityId,
- *     updated_at = :updatedAt
- * WHERE family_id = :familyId
- *   AND chat_id = :chatId
- * ```
- */
-export const setGroupChatOwner = new PreparedQuery<SetGroupChatOwnerParams,SetGroupChatOwnerResult>(setGroupChatOwnerIR);
-
-
-/** 'BumpGroupChatKeyEpoch' parameters type */
-export interface BumpGroupChatKeyEpochParams {
-  chatId?: string | null | void;
-  familyId?: string | null | void;
-  updatedAt?: NumberOrString | null | void;
-}
-
-/** 'BumpGroupChatKeyEpoch' return type */
-export interface BumpGroupChatKeyEpochResult {
-  key_epoch: number;
-}
-
-/** 'BumpGroupChatKeyEpoch' query type */
-export interface BumpGroupChatKeyEpochQuery {
-  params: BumpGroupChatKeyEpochParams;
-  result: BumpGroupChatKeyEpochResult;
-}
-
-const bumpGroupChatKeyEpochIR: any = {"usedParamSet":{"updatedAt":true,"familyId":true,"chatId":true},"params":[{"name":"updatedAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":67,"b":76},{"a":106,"b":115}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":135,"b":143}]},{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":161,"b":167}]}],"statement":"UPDATE group_chats\nSET key_epoch = key_epoch + 1,\n    updated_at = :updatedAt,\n    key_epoch_updated_at = :updatedAt\nWHERE family_id = :familyId\n  AND chat_id = :chatId\nRETURNING key_epoch"};
-
-/**
- * Query generated from SQL:
- * ```
- * UPDATE group_chats
- * SET key_epoch = key_epoch + 1,
- *     updated_at = :updatedAt,
- *     key_epoch_updated_at = :updatedAt
- * WHERE family_id = :familyId
- *   AND chat_id = :chatId
- * RETURNING key_epoch
- * ```
- */
-export const bumpGroupChatKeyEpoch = new PreparedQuery<BumpGroupChatKeyEpochParams,BumpGroupChatKeyEpochResult>(bumpGroupChatKeyEpochIR);
-
-
-/** 'FindNextGroupChatOwner' parameters type */
-export interface FindNextGroupChatOwnerParams {
-  chatId?: string | null | void;
-  familyId?: string | null | void;
-}
-
-/** 'FindNextGroupChatOwner' return type */
-export interface FindNextGroupChatOwnerResult {
-  identity_id: string;
-}
-
-/** 'FindNextGroupChatOwner' query type */
-export interface FindNextGroupChatOwnerQuery {
-  params: FindNextGroupChatOwnerParams;
-  result: FindNextGroupChatOwnerResult;
-}
-
-const findNextGroupChatOwnerIR: any = {"usedParamSet":{"familyId":true,"chatId":true},"params":[{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":66,"b":74}]},{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":92,"b":98}]}],"statement":"SELECT identity_id\nFROM group_chat_participants\nWHERE family_id = :familyId\n  AND chat_id = :chatId\n  AND is_active = TRUE\nORDER BY join_order ASC\nLIMIT 1"};
-
-/**
- * Query generated from SQL:
- * ```
- * SELECT identity_id
- * FROM group_chat_participants
- * WHERE family_id = :familyId
- *   AND chat_id = :chatId
- *   AND is_active = TRUE
- * ORDER BY join_order ASC
- * LIMIT 1
- * ```
- */
-export const findNextGroupChatOwner = new PreparedQuery<FindNextGroupChatOwnerParams,FindNextGroupChatOwnerResult>(findNextGroupChatOwnerIR);
 
 
 /** 'FindGroupChatMessageByClientMessageId' parameters type */
@@ -808,50 +644,6 @@ const listActiveGroupChatParticipantsWithIdentityKeysIR: any = {"usedParamSet":{
  * ```
  */
 export const listActiveGroupChatParticipantsWithIdentityKeys = new PreparedQuery<ListActiveGroupChatParticipantsWithIdentityKeysParams,ListActiveGroupChatParticipantsWithIdentityKeysResult>(listActiveGroupChatParticipantsWithIdentityKeysIR);
-
-
-/** 'ClaimGroupChatEpochKey' parameters type */
-export interface ClaimGroupChatEpochKeyParams {
-  chatId?: string | null | void;
-  createdAt?: NumberOrString | null | void;
-  epoch?: number | null | void;
-  familyId?: string | null | void;
-  keyCommitment?: string | null | void;
-  proposerDeviceId?: string | null | void;
-  proposerIdentityId?: string | null | void;
-  signedEpochTransition?: Json | null | void;
-}
-
-/** 'ClaimGroupChatEpochKey' return type */
-export interface ClaimGroupChatEpochKeyResult {
-  chat_id: string;
-  created_at: string;
-  epoch: number;
-  family_id: string;
-  key_commitment: string;
-  proposer_device_id: string | null;
-  proposer_identity_id: string;
-  signed_epoch_transition: Json | null;
-}
-
-/** 'ClaimGroupChatEpochKey' query type */
-export interface ClaimGroupChatEpochKeyQuery {
-  params: ClaimGroupChatEpochKeyParams;
-  result: ClaimGroupChatEpochKeyResult;
-}
-
-const claimGroupChatEpochKeyIR: any = {"usedParamSet":{"chatId":true,"familyId":true,"epoch":true,"keyCommitment":true,"proposerIdentityId":true,"proposerDeviceId":true,"signedEpochTransition":true,"createdAt":true},"params":[{"name":"chatId","required":false,"transform":{"type":"scalar"},"locs":[{"a":165,"b":171}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":174,"b":182}]},{"name":"epoch","required":false,"transform":{"type":"scalar"},"locs":[{"a":185,"b":190}]},{"name":"keyCommitment","required":false,"transform":{"type":"scalar"},"locs":[{"a":193,"b":206}]},{"name":"proposerIdentityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":209,"b":227}]},{"name":"proposerDeviceId","required":false,"transform":{"type":"scalar"},"locs":[{"a":230,"b":246}]},{"name":"signedEpochTransition","required":false,"transform":{"type":"scalar"},"locs":[{"a":249,"b":270}]},{"name":"createdAt","required":false,"transform":{"type":"scalar"},"locs":[{"a":280,"b":289}]}],"statement":"INSERT INTO group_chat_epoch_keys (chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at)\nVALUES (:chatId, :familyId, :epoch, :keyCommitment, :proposerIdentityId, :proposerDeviceId, :signedEpochTransition::jsonb, :createdAt)\nON CONFLICT (chat_id, family_id, epoch) DO NOTHING\nRETURNING chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at"};
-
-/**
- * Query generated from SQL:
- * ```
- * INSERT INTO group_chat_epoch_keys (chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at)
- * VALUES (:chatId, :familyId, :epoch, :keyCommitment, :proposerIdentityId, :proposerDeviceId, :signedEpochTransition::jsonb, :createdAt)
- * ON CONFLICT (chat_id, family_id, epoch) DO NOTHING
- * RETURNING chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at
- * ```
- */
-export const claimGroupChatEpochKey = new PreparedQuery<ClaimGroupChatEpochKeyParams,ClaimGroupChatEpochKeyResult>(claimGroupChatEpochKeyIR);
 
 
 /** 'FindGroupChatEpochKey' parameters type */

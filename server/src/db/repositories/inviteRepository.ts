@@ -63,7 +63,6 @@ export class InviteRepository {
     createdBy: string;
     expiresAt: Date;
     maxUses: number;
-    title?: string | null;
     capabilityId?: string;
     capabilityMode?: LinkCapabilityMode;
     capabilityDescriptor?: LinkCapabilityDescriptor;
@@ -79,12 +78,6 @@ export class InviteRepository {
       maxUses: data.maxUses,
     };
     const results = await createInvite.run(params, pool);
-    if (data.title) {
-      await pool.query(
-        `UPDATE invites SET title = $1 WHERE family_id = $2 AND invite_id = $3`,
-        [data.title, data.familyId, data.inviteId]
-      );
-    }
     if (data.capabilityId && data.capabilityMode && data.capabilityDescriptor) {
       await pool.query(
         `UPDATE invites
@@ -108,63 +101,7 @@ export class InviteRepository {
       );
     }
     const result = await this.findById(data.familyId, data.inviteId);
-    return Object.assign(result || results[0], { title: data.title ?? null });
-  }
-
-  async createForMemberWithQuota(data: {
-    familyId: string;
-    inviteId: string;
-    token: string;
-    createdBy: string;
-    expiresAt: Date;
-    maxUses: number;
-    title?: string | null;
-    capabilityId?: string;
-    capabilityMode?: LinkCapabilityMode;
-    capabilityDescriptor?: LinkCapabilityDescriptor;
-    encryptedSecret?: EncryptedBlob | null;
-    encryptedMembershipCheckpointBundle?: EncryptedBlob | null;
-  }): Promise<
-    | { ok: true; invite: FindByTokenResult; remaining: number }
-    | { ok: false }
-  > {
-    return transaction(async (client) => {
-      const consume = await client.query<{ invite_quota: number; invite_used: number }>(
-        `UPDATE identities
-         SET invite_used = invite_used + 1
-         WHERE identity_id = $1
-           AND family_id = $2
-           AND (invite_quota - invite_used) > 0
-         RETURNING invite_quota, invite_used`,
-        [data.createdBy, data.familyId]
-      );
-
-      if ((consume.rowCount || 0) === 0) {
-        return { ok: false };
-      }
-
-      const created = await createInvite.run({
-        inviteId: data.inviteId,
-        token: data.token,
-        familyId: data.familyId,
-        createdBy: data.createdBy,
-        expiresAt: data.expiresAt,
-        maxUses: data.maxUses,
-      }, client);
-      if (data.title) {
-        await client.query(
-          `UPDATE invites SET title = $1 WHERE family_id = $2 AND invite_id = $3`,
-          [data.title, data.familyId, data.inviteId]
-        );
-      }
-
-      const { invite_quota, invite_used } = consume.rows[0];
-      return {
-        ok: true,
-        invite: Object.assign(created[0], { title: data.title ?? null }),
-        remaining: Math.max(0, invite_quota - invite_used),
-      };
-    });
+    return result || results[0];
   }
 
   async revokeOwnedInvite(data: {

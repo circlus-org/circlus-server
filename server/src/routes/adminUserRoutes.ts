@@ -3,7 +3,12 @@ import { routeLogger } from '../utils/routeLogger';
 import { Router } from 'express';
 import { verifySignature, requireActiveIdentity, requireAdmin, type AuthRequest, getSignedPayload } from '../middleware/auth';
 import type { ApiResponse, CircleMembershipStateRecord, DeviceId, IdentityId } from '../../../shared/types';
-import { identityRepository, deviceLifecyclePolicyRepository, deviceRepository } from '../db/repositories';
+import {
+  circleOwnerGuestTreeRepository,
+  identityRepository,
+  deviceLifecyclePolicyRepository,
+  deviceRepository,
+} from '../db/repositories';
 import { query } from '../db';
 import {
   changeCircleOwnerToExistingIdentity,
@@ -33,6 +38,26 @@ import { setCircleInvitePermission } from '../services/circleInvitePermissionSer
 import { setCircleMemberStatus } from '../services/circleMembershipAdminService';
 import { notifyCircleDirectoryChanged } from '../services/circleDirectoryNotificationService';
 import { setGuestInvitePermission } from '../services/guestInvitePermissionService';
+import { mapDirectGuestPermissionsFromDb } from '../services/directGuestAccessService';
+
+const OWNER_GUEST_TREE_DEFAULT_LIMIT = 25;
+const OWNER_GUEST_TREE_MAX_LIMIT = 100;
+
+function encodeGuestTreeCursor(registrationId: string): string {
+  return Buffer.from(registrationId, 'utf8').toString('base64url');
+}
+
+function decodeGuestTreeCursor(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || value.length > 512) return undefined;
+  try {
+    const decoded = Buffer.from(value, 'base64url').toString('utf8');
+    if (!decoded || decoded.length > 255 || encodeGuestTreeCursor(decoded) !== value) return undefined;
+    return decoded;
+  } catch {
+    return undefined;
+  }
+}
 
 const router = Router();
 router.post(
@@ -50,7 +75,14 @@ router.post(
         deviceLifecyclePolicyRepository.listReviewDevices(req.familyId, policy),
         deviceLifecyclePolicyRepository.listUnreachableProfiles(req.familyId)
       ]);
-      return res.json({ status: 'ok', result: { policy, devices, unreachableProfiles } } as ApiResponse);
+      return res.json({
+        status: 'ok',
+        result: {
+          policy,
+          devices: devices.map((entry) => ({ ...entry, label: null })),
+          unreachableProfiles,
+        }
+      } as ApiResponse);
     } catch (error) {
       routeLogger.error('Get inactive device review error:', error);
       return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to get inactive device review' } } as ApiResponse);
@@ -73,7 +105,7 @@ router.post(
         } as ApiResponse);
       }
 
-      const [users, membershipProofs, membershipStates, inviteSummaries] = await Promise.all([
+      const [users, membershipProofs, membershipStates, inviteSummaries, guestCounts] = await Promise.all([
         identityRepository.findAll(familyId),
         listCircleIdentityAdmissionProofs(familyId),
         listCircleMembershipStates(familyId),
@@ -103,13 +135,27 @@ router.post(
             GROUP BY created_by`,
           [familyId]
         ),
+        query<{ host_identity_id: string; active_guest_count: string }>(
+          `SELECT registration.host_identity_id,
+                  COUNT(DISTINCT registration.guest_identity_id)::text AS active_guest_count
+             FROM direct_guest_registrations registration
+             JOIN identities guest
+               ON guest.family_id = registration.family_id
+              AND guest.identity_id = registration.guest_identity_id
+              AND guest.status = 'active'
+            WHERE registration.family_id = $1
+              AND registration.status = 'active'
+            GROUP BY registration.host_identity_id`,
+          [familyId]
+        ),
       ]);
       const inviteSummaryByCreator = new Map(inviteSummaries.rows.map((summary) => [summary.created_by, summary]));
+      const guestCountByHost = new Map(guestCounts.rows.map((entry) => [entry.host_identity_id, Number(entry.active_guest_count || '0')]));
 
       return res.json({
         status: 'ok',
         result: {
-          users: users.map(u => ({
+          users: users.filter((u) => u.role !== 'guest').map(u => ({
             identityId: u.identity_id,
             identityName: null,
             publicKey: {
@@ -124,6 +170,7 @@ router.post(
               || Boolean((u as typeof u & { can_create_invites?: boolean }).can_create_invites),
             canCreateGuestInvites: u.role === 'owner'
               || Boolean((u as typeof u & { can_create_guest_invites?: boolean }).can_create_guest_invites),
+            activeGuestCount: guestCountByHost.get(u.identity_id) || 0,
             invitationSummary: (() => {
               const summary = inviteSummaryByCreator.get(u.identity_id);
               return {
@@ -131,9 +178,7 @@ router.post(
                 activeSingleUse: Number(summary?.active_single_use || 0),
                 activeUnlimited: Number(summary?.active_unlimited || 0)
               };
-            })(),
-            inviteQuota: u.invite_quota,
-            inviteUsed: u.invite_used
+            })()
           })),
           membershipProofs,
           membershipStates,
@@ -149,6 +194,101 @@ router.post(
           message: 'Failed to get users'
         }
       } as ApiResponse);
+    }
+  }
+);
+
+/**
+ * Load one level of the Circle guest tree. Names and device labels remain
+ * private to the identity that owns them; the owner receives only operational
+ * metadata needed to audit and revoke Circle access.
+ */
+router.post(
+  '/guests/children',
+  verifySignature,
+  requireActiveIdentity,
+  requireAdmin,
+  async (req: AuthRequest, res) => {
+    try {
+      const familyId = req.familyId;
+      const payload = getSignedPayload<{
+        hostIdentityId?: unknown;
+        cursor?: unknown;
+        limit?: unknown;
+        includeInactive?: unknown;
+      }>(req);
+      const hostIdentityId = typeof payload.hostIdentityId === 'string'
+        ? payload.hostIdentityId.trim()
+        : '';
+      const cursor = decodeGuestTreeCursor(payload.cursor);
+      const requestedLimit = payload.limit === undefined
+        ? OWNER_GUEST_TREE_DEFAULT_LIMIT
+        : Number(payload.limit);
+      if (!familyId) {
+        return sendApiError(res, 500, 'MISSING_FAMILY_ID', 'Family context not set');
+      }
+      if (!hostIdentityId || hostIdentityId.length > 255) {
+        return sendApiError(res, 400, 'INVALID_REQUEST', 'hostIdentityId is required');
+      }
+      if (cursor === undefined) {
+        return sendApiError(res, 400, 'INVALID_REQUEST', 'Invalid guest tree cursor');
+      }
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > OWNER_GUEST_TREE_MAX_LIMIT) {
+        return sendApiError(res, 400, 'INVALID_REQUEST', `limit must be between 1 and ${OWNER_GUEST_TREE_MAX_LIMIT}`);
+      }
+      if (payload.includeInactive !== undefined && typeof payload.includeInactive !== 'boolean') {
+        return sendApiError(res, 400, 'INVALID_REQUEST', 'includeInactive must be boolean');
+      }
+
+      const host = await identityRepository.findByIdentityId(familyId, hostIdentityId as IdentityId);
+      if (!host) return sendApiError(res, 404, 'NOT_FOUND', 'Guest host not found');
+
+      const rows = await circleOwnerGuestTreeRepository.listChildren({
+        familyId,
+        hostIdentityId,
+        afterRegistrationId: cursor,
+        limit: requestedLimit,
+        includeInactive: payload.includeInactive === true,
+      });
+      const hasMore = rows.length > requestedLimit;
+      const page = hasMore ? rows.slice(0, requestedLimit) : rows;
+      return res.json({
+        status: 'ok',
+        result: {
+          host: {
+            identityId: host.identity_id,
+            role: host.role || 'member',
+            status: host.status,
+          },
+          guests: page.map((row) => ({
+            registrationId: row.registration_id,
+            linkId: row.link_id,
+            hostIdentityId: row.host_identity_id,
+            guestIdentityId: row.guest_identity_id,
+            guestIdentityPublicKey: {
+              algorithm: row.guest_public_key_algorithm,
+              value: row.guest_public_key_value,
+            },
+            identityStatus: row.guest_status,
+            accessStatus: row.registration_status,
+            canCreateGuestInvites: row.can_create_guest_invites === true,
+            permissions: mapDirectGuestPermissionsFromDb(row),
+            createdAt: row.created_at.toISOString(),
+            updatedAt: row.updated_at.toISOString(),
+            revokedAt: row.revoked_at?.toISOString() || null,
+            lastSeenAt: row.last_seen_at?.toISOString() || null,
+            activeConnectionCount: Number(row.active_device_count || 0),
+            revokedConnectionCount: Number(row.revoked_device_count || 0),
+            activeChildGuestCount: Number(row.active_child_guest_count || 0),
+          })),
+          nextCursor: hasMore && page.length > 0
+            ? encodeGuestTreeCursor(page[page.length - 1].registration_id)
+            : null,
+        }
+      } as ApiResponse);
+    } catch (error) {
+      routeLogger.error('Get Circle guest tree children error:', error);
+      return sendApiError(res, 500, 'INTERNAL_ERROR', 'Failed to load Circle guests');
     }
   }
 );
@@ -236,84 +376,6 @@ router.post(
       } as ApiResponse);
     }
   }
-);
-
-/**
- * Update user role (owner only)
- * Allowed target role: member.
- */
-router.post(
-  '/users/:identityId/role',
-  verifySignature,
-  requireActiveIdentity,
-  requireAdmin,
-  versionedAccessOperation(async (req: AuthRequest, res) => {
-    try {
-      const { identityId } = req.params;
-      const { role } = getSignedPayload<{ role?: string }>(req);
-      const familyId = req.familyId;
-
-      if (!familyId) {
-        return res.status(500).json({
-          status: 'error',
-          error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' }
-        } as ApiResponse);
-      }
-
-      // Validate role
-      if (role !== 'member') {
-        return res.status(400).json({
-          status: 'error',
-          error: { code: 'INVALID_REQUEST', message: 'Only member role can be assigned' }
-        } as ApiResponse);
-      }
-
-      // Get target user
-      const targetUser = await identityRepository.findByIdentityId(familyId, identityId);
-      if (!targetUser) {
-        return res.status(404).json({
-          status: 'error',
-          error: { code: 'NOT_FOUND', message: 'User not found' }
-        } as ApiResponse);
-      }
-
-      // Cannot modify owner
-      if (targetUser.role === 'owner') {
-        return res.status(403).json({
-          status: 'error',
-          error: { code: 'FORBIDDEN', message: 'Cannot modify owner role' }
-        } as ApiResponse);
-      }
-
-      if (targetUser.status === 'removed') {
-        return res.status(409).json({
-          status: 'error',
-          error: { code: 'INVALID_STATE', message: 'Cannot modify a removed user' }
-        } as ApiResponse);
-      }
-
-      // Update role
-      const updated = await identityRepository.updateRole(familyId, identityId, role);
-
-      return res.json({
-        status: 'ok',
-        result: {
-          identityId: updated.identity_id,
-          role: updated.role
-        }
-      } as ApiResponse);
-
-    } catch (error) {
-      routeLogger.error('Update role error:', error);
-      return res.status(500).json({
-        status: 'error',
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to update role'
-        }
-      } as ApiResponse);
-    }
-  })
 );
 
 /**
@@ -682,6 +744,11 @@ router.post(
         } as ApiResponse);
       }
 
+      const targetIdentity = await identityRepository.findByIdentityId(familyId, identityId as IdentityId);
+      if (!targetIdentity || targetIdentity.role === 'guest') {
+        return sendApiError(res, 404, 'NOT_FOUND', 'Circle member not found');
+      }
+
       const devices = await deviceRepository.findByIdentityId(familyId, identityId);
 
       return res.json({
@@ -694,7 +761,7 @@ router.post(
               algorithm: d.public_key_algorithm as 'ed25519' | 'x25519',
               value: d.public_key_value
             },
-            label: d.label,
+            label: null,
             status: d.status,
             createdAt: d.created_at.toISOString(),
             lastSeenAt: d.last_seen_at?.toISOString()

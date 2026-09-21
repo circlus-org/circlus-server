@@ -117,6 +117,7 @@ export interface ListDirectGuestRegistrationsByLinkResult {
   created_at: Date;
   family_id: string;
   guest_can_call_host: boolean;
+  guest_can_create_guest_invites: boolean;
   guest_can_direct_file_transfer_host: boolean;
   guest_can_message_host: boolean;
   guest_can_server_attachments_host: boolean;
@@ -143,7 +144,7 @@ export interface ListDirectGuestRegistrationsByLinkQuery {
   result: ListDirectGuestRegistrationsByLinkResult;
 }
 
-const listDirectGuestRegistrationsByLinkIR: any = {"usedParamSet":{"familyId":true,"linkId":true,"hostIdentityId":true},"params":[{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":320,"b":328}]},{"name":"linkId","required":false,"transform":{"type":"scalar"},"locs":[{"a":348,"b":354}]},{"name":"hostIdentityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":383,"b":397}]}],"statement":"SELECT r.*,\n       i.identity_name AS guest_identity_name,\n       i.public_key_algorithm AS guest_public_key_algorithm,\n       i.public_key_value AS guest_public_key_value\nFROM direct_guest_registrations r\nLEFT JOIN identities i\n  ON i.family_id = r.family_id AND i.identity_id = r.guest_identity_id\nWHERE r.family_id = :familyId\n  AND r.link_id = :linkId\n  AND r.host_identity_id = :hostIdentityId\nORDER BY r.created_at DESC"};
+const listDirectGuestRegistrationsByLinkIR: any = {"usedParamSet":{"familyId":true,"linkId":true,"hostIdentityId":true},"params":[{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":389,"b":397}]},{"name":"linkId","required":false,"transform":{"type":"scalar"},"locs":[{"a":417,"b":423}]},{"name":"hostIdentityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":452,"b":466}]}],"statement":"SELECT r.*,\n       i.identity_name AS guest_identity_name,\n       i.public_key_algorithm AS guest_public_key_algorithm,\n       i.public_key_value AS guest_public_key_value,\n       i.can_create_guest_invites AS guest_can_create_guest_invites\nFROM direct_guest_registrations r\nLEFT JOIN identities i\n  ON i.family_id = r.family_id AND i.identity_id = r.guest_identity_id\nWHERE r.family_id = :familyId\n  AND r.link_id = :linkId\n  AND r.host_identity_id = :hostIdentityId\nORDER BY r.created_at DESC"};
 
 /**
  * Query generated from SQL:
@@ -151,7 +152,8 @@ const listDirectGuestRegistrationsByLinkIR: any = {"usedParamSet":{"familyId":tr
  * SELECT r.*,
  *        i.identity_name AS guest_identity_name,
  *        i.public_key_algorithm AS guest_public_key_algorithm,
- *        i.public_key_value AS guest_public_key_value
+ *        i.public_key_value AS guest_public_key_value,
+ *        i.can_create_guest_invites AS guest_can_create_guest_invites
  * FROM direct_guest_registrations r
  * LEFT JOIN identities i
  *   ON i.family_id = r.family_id AND i.identity_id = r.guest_identity_id
@@ -535,5 +537,3 @@ const revokeAllDirectGuestRegistrationsByLinkIR: any = {"usedParamSet":{"familyI
  * ```
  */
 export const revokeAllDirectGuestRegistrationsByLink = new PreparedQuery<RevokeAllDirectGuestRegistrationsByLinkParams,RevokeAllDirectGuestRegistrationsByLinkResult>(revokeAllDirectGuestRegistrationsByLinkIR);
-
-

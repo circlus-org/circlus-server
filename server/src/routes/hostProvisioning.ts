@@ -119,7 +119,6 @@ router.post('/circles', rlHostProvisioning, async (req, res) => {
   try {
     const payload = req.body as {
       claimToken?: string;
-      serverName?: string;
       publicBaseUrl?: string;
       noNamesOnServer?: boolean;
       messageTtlHours?: number;
@@ -130,14 +129,13 @@ router.post('/circles', rlHostProvisioning, async (req, res) => {
     };
 
     const claimToken = String(payload.claimToken || '').trim();
-    const serverName = String(payload.serverName || '').trim();
     const noNamesOnServer = true;
     const normalizedUrl = normalizePublicServerUrl(payload.publicBaseUrl);
 
-    if (!claimToken || !serverName || !normalizedUrl) {
+    if (!claimToken || !normalizedUrl) {
       return res.status(400).json({
         status: 'error',
-        error: { code: 'INVALID_REQUEST', message: 'claimToken, serverName, and publicBaseUrl are required' }
+        error: { code: 'INVALID_REQUEST', message: 'claimToken and publicBaseUrl are required' }
       });
     }
 
@@ -152,6 +150,7 @@ router.post('/circles', rlHostProvisioning, async (req, res) => {
 
     const publicBaseUrl = normalizedUrl;
     const url = new URL(publicBaseUrl);
+    const serverName = url.hostname;
     if (url.protocol !== 'https:' && !isLocalHttpUrl(url)) {
       return res.status(400).json({
         status: 'error',

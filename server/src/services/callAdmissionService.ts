@@ -8,7 +8,6 @@ export type CallLinkGrantResult = {
   reason?: 'not_found' | 'expired' | 'invalid_secret' | 'target_mismatch' | 'inactive';
   descriptor?: LinkCapabilityDescriptor;
   proof?: LinkCapabilityProof;
-  title?: string | null;
 };
 
 export type WhitelistGrantResult = {
@@ -47,7 +46,6 @@ export async function verifyCallLinkActionGrant(input: {
 
   const result = await query<{
     call_link_id: string;
-    title: string | null;
     target_identity_id: string;
     secret_hash: string;
     status: string;
@@ -60,7 +58,7 @@ export async function verifyCallLinkActionGrant(input: {
     claimed_by_public_key_algorithm: string | null;
     claimed_by_public_key_value: string | null;
   }>(
-    `SELECT call_link_id, title, target_identity_id, secret_hash, status, expires_at,
+    `SELECT call_link_id, target_identity_id, secret_hash, status, expires_at,
             capability_id, capability_mode, capability_descriptor, last_used_at,
             claimed_by_identity_id, claimed_by_public_key_algorithm, claimed_by_public_key_value
      FROM call_links
@@ -99,11 +97,6 @@ export async function verifyCallLinkActionGrant(input: {
   ) {
     return { ok: false, reason: 'invalid_secret' };
   }
-  const signedTitle = typeof row.capability_descriptor.payload.scope?.title === 'string'
-    ? row.capability_descriptor.payload.scope.title.trim()
-    : '';
-  const title = signedTitle || row.title;
-
   if (!input.touchUsage) {
     if (
       row.capability_mode === 'single-use'
@@ -119,8 +112,7 @@ export async function verifyCallLinkActionGrant(input: {
     return {
       ok: true,
       descriptor: row.capability_descriptor,
-      proof: capabilityProof,
-      title
+      proof: capabilityProof
     };
   }
 
@@ -160,7 +152,7 @@ export async function verifyCallLinkActionGrant(input: {
   );
   if ((touched.rowCount || 0) === 0) return { ok: false, reason: 'inactive' };
 
-  return { ok: true, descriptor: row.capability_descriptor, proof: capabilityProof, title };
+  return { ok: true, descriptor: row.capability_descriptor, proof: capabilityProof };
 }
 
 export async function verifyWhitelistGrant(input: {

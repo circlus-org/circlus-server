@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { nanoid } from 'nanoid';
 import { verifySignature, requireActiveIdentity, requireServerAdmin, getSignedPayload, type AuthRequest } from '../middleware/auth';
-import { circleOwnerRecoveryRepository, deviceLifecyclePolicyRepository, deviceRepository, familyConfigRepository, familyDomainRepository, identityRepository, inviteRepository, managedPushConfigurationRepository, tenantOwnerClaimsRepository, TenantSuspensionError } from '../db/repositories';
+import { deviceLifecyclePolicyRepository, familyConfigRepository, familyDomainRepository, identityRepository, inviteRepository, managedPushConfigurationRepository, tenantOwnerClaimsRepository, TenantSuspensionError } from '../db/repositories';
 import { configService } from '../services/configService';
 import { attachmentStorageService } from '../services/attachmentStorageService';
 import { publicSiteAssetStorageService } from '../services/publicSiteAssetStorageService';
@@ -19,13 +19,6 @@ import {
   normalizeMessageArchivePolicyMode,
   type MessageArchivePolicyMode
 } from '../utils/messageArchivePolicy';
-import type { CircleOwnerRecoveryAcceptance } from '@shared/types';
-import {
-  changeCircleOwnerToExistingIdentity,
-  CircleOwnershipError,
-  deliverCircleOwnerChangedPush,
-  recoverCircleOwnerWithNewIdentity
-} from '../services/circleOwnershipService';
 import serverAdminAccessRoutes from './serverAdminAccessRoutes';
 import { suspendCircleWsAccess } from '../ws/wsGateway';
 import { getCircleAddressRuntimeConfig, getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
@@ -186,173 +179,6 @@ router.post(
   }
 );
 
-
-router.post(
-  '/tenants/:familyId/owner-recovery/options',
-  verifySignature,
-  requireActiveIdentity,
-  requireServerAdmin,
-  async (req: AuthRequest, res) => {
-    try {
-      const familyId = String(req.params.familyId || '').trim();
-      const config = await familyConfigRepository.findByFamilyId(familyId);
-      if (!config) {
-        return res.status(404).json({ status: 'error', error: { code: 'NOT_FOUND', message: 'Circle not found' } });
-      }
-      if (config.status !== 'active' || !config.owner_identity_id) {
-        return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE', message: 'Circle does not have an active ownership state' } });
-      }
-      const identities = await identityRepository.findAll(familyId);
-      const activeDevices = await deviceRepository.findActiveByIdentityIds(
-        familyId,
-        identities.map((identity) => identity.identity_id as any)
-      );
-      const deviceCounts = new Map<string, number>();
-      for (const device of activeDevices) {
-        deviceCounts.set(device.identity_id, (deviceCounts.get(device.identity_id) || 0) + 1);
-      }
-      const owner = identities.find((identity) => identity.identity_id === config.owner_identity_id) || null;
-      return res.json({
-        status: 'ok',
-        result: {
-          circle: {
-            familyId,
-            circleId: config.circle_id,
-            name: config.server_name,
-            publicBaseUrl: config.public_base_url,
-            noNamesOnServer: config.no_names_on_server
-          },
-          currentOwner: owner ? {
-            identityId: owner.identity_id,
-            identityName: null,
-            status: owner.status,
-            activeDeviceCount: deviceCounts.get(owner.identity_id) || 0
-          } : null,
-          candidates: identities
-            .filter((identity) => identity.status === 'active' && identity.role === 'member')
-            .map((identity) => ({
-              identityId: identity.identity_id,
-              identityName: null,
-              activeDeviceCount: deviceCounts.get(identity.identity_id) || 0
-            }))
-        }
-      });
-    } catch (error) {
-      routeLogger.error('Get Circle owner recovery options error:', error);
-      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to load owner recovery options' } });
-    }
-  }
-);
-
-router.post(
-  '/tenants/:familyId/owner-recovery/assign',
-  verifySignature,
-  requireActiveIdentity,
-  requireServerAdmin,
-  async (req: AuthRequest<{ expectedOwnerIdentityId?: string; newOwnerIdentityId?: string }>, res) => {
-    try {
-      const familyId = String(req.params.familyId || '').trim();
-      const payload = getSignedPayload<{ expectedOwnerIdentityId?: string; newOwnerIdentityId?: string }>(req);
-      const result = await changeCircleOwnerToExistingIdentity({
-        familyId,
-        expectedOwnerIdentityId: String(payload.expectedOwnerIdentityId || '').trim(),
-        newOwnerIdentityId: String(payload.newOwnerIdentityId || '').trim(),
-        method: 'server_admin_recovery',
-        initiatedByIdentityId: req.identity!.identityId,
-        initiatedByDeviceId: req.device!.deviceId,
-        initiatedByServerAdminId: req.serverAdmin!.serverAdminId,
-        signedAuthorization: req.signedRequest
-      });
-      void deliverCircleOwnerChangedPush(result);
-      return res.json({ status: 'ok', result });
-    } catch (error) {
-      if (error instanceof CircleOwnershipError) {
-        return res.status(error.status).json({ status: 'error', error: { code: error.code, message: error.message } });
-      }
-      routeLogger.error('Assign recovered Circle owner error:', error);
-      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to recover Circle owner' } });
-    }
-  }
-);
-
-router.post(
-  '/tenants/:familyId/owner-recovery/claims',
-  verifySignature,
-  requireActiveIdentity,
-  requireServerAdmin,
-  reliableOperation(async (req: AuthRequest<{ expectedOwnerIdentityId?: string; ttlHours?: number }>, res) => {
-    try {
-      const familyId = String(req.params.familyId || '').trim();
-      const payload = getSignedPayload<{ expectedOwnerIdentityId?: string; ttlHours?: number }>(req);
-      const expectedOwnerIdentityId = String(payload.expectedOwnerIdentityId || '').trim();
-      const config = await familyConfigRepository.findByFamilyId(familyId);
-      if (!config) return res.status(404).json({ status: 'error', error: { code: 'NOT_FOUND', message: 'Circle not found' } });
-      if (config.status !== 'active' || !expectedOwnerIdentityId || config.owner_identity_id !== expectedOwnerIdentityId) {
-        return res.status(409).json({ status: 'error', error: { code: 'OWNER_CHANGED', message: 'Circle owner changed after recovery was started' } });
-      }
-      const ttlHours = Math.max(1, Math.min(168, Math.floor(Number(payload.ttlHours || 24))));
-      const claimToken = createOpaqueClaimToken('cor');
-      const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
-      await circleOwnerRecoveryRepository.revokePending(familyId);
-      const claim = await circleOwnerRecoveryRepository.createClaim({
-        familyId,
-        tokenHash: hashClaimToken(claimToken),
-        expectedOwnerIdentityId,
-        createdByServerAdminId: req.serverAdmin!.serverAdminId,
-        createdAuthorization: req.signedRequest,
-        expiresAt
-      });
-      return res.json({
-        status: 'ok',
-        result: {
-          claimId: claim.claim_id,
-          familyId,
-          circleId: config.circle_id,
-          publicBaseUrl: config.public_base_url,
-          expectedOwnerIdentityId,
-          claimToken,
-          expiresAt: expiresAt.toISOString()
-        }
-      });
-    } catch (error) {
-      routeLogger.error('Create Circle owner recovery claim error:', error);
-      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to create owner recovery claim' } });
-    }
-  })
-);
-
-router.post(
-  '/tenants/:familyId/owner-recovery/create-profile',
-  verifySignature,
-  requireActiveIdentity,
-  requireServerAdmin,
-  async (req: AuthRequest<{ expectedOwnerIdentityId?: string; acceptance?: CircleOwnerRecoveryAcceptance }>, res) => {
-    try {
-      const familyId = String(req.params.familyId || '').trim();
-      const payload = getSignedPayload<{ expectedOwnerIdentityId?: string; acceptance?: CircleOwnerRecoveryAcceptance }>(req);
-      if (!payload.acceptance) {
-        return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'New owner acceptance is required' } });
-      }
-      const result = await recoverCircleOwnerWithNewIdentity({
-        familyId,
-        expectedOwnerIdentityId: String(payload.expectedOwnerIdentityId || '').trim(),
-        acceptance: payload.acceptance,
-        initiatedByIdentityId: req.identity!.identityId,
-        initiatedByDeviceId: req.device!.deviceId,
-        initiatedByServerAdminId: req.serverAdmin!.serverAdminId,
-        signedAuthorization: { administrator: req.signedRequest, newIdentityAcceptance: payload.acceptance }
-      });
-      void deliverCircleOwnerChangedPush(result);
-      return res.json({ status: 'ok', result });
-    } catch (error) {
-      if (error instanceof CircleOwnershipError) {
-        return res.status(error.status).json({ status: 'error', error: { code: error.code, message: error.message } });
-      }
-      routeLogger.error('Create recovered Circle owner profile error:', error);
-      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Failed to create recovered owner profile' } });
-    }
-  }
-);
 
 router.post(
   '/tenants/:familyId/suspend',
@@ -559,7 +385,6 @@ router.post(
         messageArchiveCirclePolicy?: MessageArchivePolicyMode;
         messageArchiveCircleMaxBytes?: number | null;
       }>(req);
-      const serverName = String(payload.serverName || '').trim();
       const noNamesOnServer = true;
       const requestedJoinInviteToken = payload.joinInviteToken;
       const joinInviteToken = String(requestedJoinInviteToken || '').trim() || `join_${nanoid(24)}`;
@@ -636,9 +461,7 @@ router.post(
       const publicBaseUrl = normalizedUrl;
       const publicUrl = new URL(normalizedUrl);
       const host = normalizeHost(publicUrl.host);
-      if (!serverName) {
-        return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'serverName is required' } });
-      }
+      const serverName = host;
 
       if (addressMode === 'shared' && host !== normalizeHost(getRequestHost(req) || '')) {
         return res.status(400).json({
@@ -845,11 +668,10 @@ router.post(
       const updates: Parameters<typeof configService.updateFamilyConfig>[1] = {};
 
       if (payload.serverName !== undefined) {
-        const serverName = String(payload.serverName).trim();
-        if (!serverName) {
-          return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'serverName cannot be empty' } });
-        }
-        updates.serverName = serverName;
+        return res.status(400).json({
+          status: 'error',
+          error: { code: 'INVALID_REQUEST', message: 'Circle names must be changed by the Circle owner using encrypted shared metadata' }
+        });
       }
       if (payload.messageTtlHours !== undefined) {
         updates.messageTtlHours = Math.max(1, Math.floor(Number(payload.messageTtlHours)));

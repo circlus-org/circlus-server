@@ -107,7 +107,9 @@ export const CIRCLE_MIGRATION_V2_TABLE_CONTRACT = {
     'circle_membership_states',
     'circle_profile_epochs',
     'circle_profile_epoch_envelopes',
-    'circle_encrypted_identity_profiles'
+    'circle_encrypted_identity_profiles',
+    'circle_encrypted_shared_metadata',
+    'circle_encrypted_identity_statuses'
   ],
   drop: [
     'attachment_blobs',

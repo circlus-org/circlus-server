@@ -323,7 +323,7 @@ describe('direct guest public resolve', () => {
     resetDirectGuestLinkPublicMocks();
   });
 
-  test('never exposes the private link label and uses only public presentation data', async () => {
+  test('never exposes private link or presentation text', async () => {
     (directGuestLinkRepository.findById as jest.Mock).mockResolvedValueOnce(capableLink({
       link_id: 'link_1',
       host_identity_id: 'host_identity',
@@ -364,10 +364,7 @@ describe('direct guest public resolve', () => {
       result: expect.objectContaining({
         hostIdentityName: null,
         hostIdentityId: 'host_identity',
-        presentation: expect.objectContaining({
-          title: 'Public invitation title',
-          description: 'Public description',
-        }),
+        presentation: expect.objectContaining({ title: null, description: null }),
       }),
     }));
     const response = res.json.mock.calls[0][0];
@@ -481,8 +478,8 @@ describe('direct guest public resolve', () => {
       result: expect.objectContaining({
         channelInvitation: {
           channelId: 'ach_1',
-          title: 'Updates',
-          description: 'Circle news',
+          title: null,
+          description: null,
         },
       }),
     }));

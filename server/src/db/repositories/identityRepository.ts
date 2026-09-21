@@ -4,23 +4,16 @@ import { getFeaturePolicyRuntimeConfig } from '../../config/serverRuntimeConfig'
 
 import type {
   FindByIdentityIdResult,
-  CreateIdentityParams,
-  FindPublishedIdentitiesParams,
-  FindPublishedIdentitiesResult,
 } from './identityRepository.queries';
 
 import {
   findByIdentityId,
   findByPublicKey,
-  createIdentity,
   updateStatus,
   countIdentities,
   findByStatus,
   findByRole,
   findAllIdentities,
-  findPublishedIdentities,
-  updateRole as updateRoleQuery,
-  updateStatusText,
 } from './identityRepository.queries';
 
 export class IdentityRepository {
@@ -54,41 +47,6 @@ export class IdentityRepository {
   }
 
   /**
-   * Create new identity
-   */
-  async create(data: {
-    familyId: string;
-    identityId: IdentityId;
-    publicKeyAlgorithm: 'ed25519' | 'x25519';
-    publicKeyValue: string;
-    encryptedPrivateKey: any;
-    role?: 'owner' | 'member' | 'guest';
-    publishIdentity?: boolean;
-    identityName?: string | null;
-  }): Promise<FindByIdentityIdResult> {
-    const params: CreateIdentityParams & { familyId: string } = {
-      familyId: data.familyId,
-      identityId: data.identityId,
-      publicKeyAlgorithm: data.publicKeyAlgorithm,
-      publicKeyValue: data.publicKeyValue,
-      encryptedPrivateKey: data.encryptedPrivateKey,
-      role: data.role || 'member',
-      publishIdentity: data.publishIdentity ?? false,
-      identityName: data.identityName || null,
-    };
-    const results = await createIdentity.run(params, pool);
-    return results[0];
-  }
-
-  /**
-   * Find published identities for a family
-   */
-  async findPublished(familyId: string): Promise<FindPublishedIdentitiesResult[]> {
-    const params: FindPublishedIdentitiesParams & { familyId: string } = { familyId };
-    return await findPublishedIdentities.run(params, pool);
-  }
-
-  /**
    * Update identity status
    */
   async updateStatus(
@@ -97,18 +55,6 @@ export class IdentityRepository {
     status: 'active' | 'disabled'
   ): Promise<FindByIdentityIdResult> {
     const results = await updateStatus.run({ familyId, identityId, status }, pool);
-    return results[0];
-  }
-
-  /**
-   * Update identity role
-   */
-  async updateRole(
-    familyId: string,
-    identityId: IdentityId,
-    role: 'owner' | 'member' | 'guest'
-  ): Promise<FindByIdentityIdResult> {
-    const results = await updateRoleQuery.run({ familyId, identityId, role }, pool);
     return results[0];
   }
 
@@ -142,24 +88,11 @@ export class IdentityRepository {
   }
 
   /**
-   * Update user status text
-   */
-  async updateStatusText(
-    familyId: string,
-    identityId: IdentityId,
-    statusText: string | null
-  ): Promise<void> {
-    await updateStatusText.run({ familyId, identityId, statusText }, pool);
-  }
-
-  /**
    * Get statuses and presence for multiple identities.
    * Presence is updated only by the explicit foreground heartbeat. Technical
    * device activity remains in devices.last_seen_at for lifecycle policies.
    */
   async getStatuses(familyId: string, identityIds: IdentityId[]): Promise<Map<IdentityId, {
-    statusText: string | null;
-    statusUpdatedAt: Date | null;
     avatarBlobId: string | null;
     presenceVisible: boolean;
     lastSeenAt: Date | null;
@@ -174,8 +107,6 @@ export class IdentityRepository {
 
     const result = await query<{
       identity_id: string;
-      status_text: string | null;
-      status_updated_at: Date | null;
       avatar_blob_id: string | null;
       presence_visible: boolean;
       last_seen_at: Date | null;
@@ -186,8 +117,6 @@ export class IdentityRepository {
          SELECT UNNEST($1::text[]) AS identity_id
        )
        SELECT i.identity_id,
-              i.status_text,
-              i.status_updated_at,
               i.avatar_blob_id,
               i.presence_visible,
               CASE WHEN i.presence_visible THEN i.presence_last_seen_at ELSE NULL END AS last_seen_at,
@@ -207,8 +136,6 @@ export class IdentityRepository {
     );
 
     const statusMap = new Map<IdentityId, {
-      statusText: string | null;
-      statusUpdatedAt: Date | null;
       avatarBlobId: string | null;
       presenceVisible: boolean;
       lastSeenAt: Date | null;
@@ -217,8 +144,6 @@ export class IdentityRepository {
     }>();
     for (const row of result.rows) {
       statusMap.set(row.identity_id as IdentityId, {
-        statusText: row.status_text,
-        statusUpdatedAt: row.status_updated_at,
         avatarBlobId: row.avatar_blob_id,
         presenceVisible: row.presence_visible,
         lastSeenAt: row.last_seen_at,

@@ -31,6 +31,8 @@ export type FamilyConfigListItem = DBFamilyConfig & {
   owner_claim_expires_at: Date | null;
   pending_owner_claim_count: number;
   identity_count: number;
+  active_member_identity_count: number;
+  active_guest_identity_count: number;
   active_device_count: number;
   owner_active_device_count: number;
   active_channel_count: number;
@@ -112,6 +114,8 @@ export class FamilyConfigRepository {
          claims.owner_claim_expires_at,
          COALESCE(claims.pending_owner_claim_count, 0)::int AS pending_owner_claim_count,
          COALESCE(ids.identity_count, 0)::int AS identity_count,
+         COALESCE(ids.active_member_identity_count, 0)::int AS active_member_identity_count,
+         COALESCE(ids.active_guest_identity_count, 0)::int AS active_guest_identity_count,
          COALESCE(device_stats.active_device_count, 0)::int AS active_device_count,
          COALESCE(device_stats.owner_active_device_count, 0)::int AS owner_active_device_count,
          COALESCE(channel_stats.active_channel_count, 0)::int AS active_channel_count,
@@ -134,7 +138,13 @@ export class FamilyConfigRepository {
        LEFT JOIN (
          SELECT
            family_id,
-           COUNT(DISTINCT identity_id) AS identity_count
+           COUNT(DISTINCT identity_id) AS identity_count,
+           COUNT(DISTINCT identity_id) FILTER (
+             WHERE status = 'active' AND role IN ('owner', 'member')
+           ) AS active_member_identity_count,
+           COUNT(DISTINCT identity_id) FILTER (
+             WHERE status = 'active' AND role = 'guest'
+           ) AS active_guest_identity_count
          FROM identities
          GROUP BY family_id
        ) ids
@@ -852,6 +862,8 @@ export class FamilyConfigRepository {
         'direct_guest_registrations',
         'direct_guest_link_defaults',
         'direct_guest_links',
+        'circle_encrypted_identity_statuses',
+        'circle_encrypted_shared_metadata',
         'circle_encrypted_identity_profiles',
         'circle_profile_epoch_envelopes',
         'circle_profile_epochs',

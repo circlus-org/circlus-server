@@ -277,28 +277,17 @@ export async function registerMemberIdentity(params: {
     await client.query(
       `UPDATE invites
        SET used_count = used_count + 1,
-           status = CASE WHEN used_count + 1 >= max_uses THEN 'exhausted' ELSE status END,
-           accepted_by_identity_id = $1,
-           accepted_by_public_key = $2,
-           accepted_identity_name = $3,
-           accepted_at = NOW()
-       WHERE invite_id = $4 AND family_id = $5`,
-      [
-        identity.identity_id,
-        identity.public_key_value,
-        null,
-        invite.invite_id,
-        params.familyId
-      ]
+           status = CASE WHEN used_count + 1 >= max_uses THEN 'exhausted' ELSE status END
+       WHERE invite_id = $1 AND family_id = $2`,
+      [invite.invite_id, params.familyId]
     );
     await client.query(
       `INSERT INTO invite_acceptances (
          invite_id, family_id, accepted_by_identity_id, accepted_by_public_key,
-         accepted_identity_name, accepted_at, capability_id, admission_claim
-       ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7::jsonb)
+         accepted_at, capability_id, admission_claim
+       ) VALUES ($1, $2, $3, $4, NOW(), $5, $6::jsonb)
        ON CONFLICT (invite_id, accepted_by_identity_id) DO UPDATE
        SET accepted_by_public_key = EXCLUDED.accepted_by_public_key,
-           accepted_identity_name = EXCLUDED.accepted_identity_name,
            accepted_at = EXCLUDED.accepted_at,
            capability_id = EXCLUDED.capability_id,
            admission_claim = EXCLUDED.admission_claim`,
@@ -307,7 +296,6 @@ export async function registerMemberIdentity(params: {
         params.familyId,
         identity.identity_id,
         identity.public_key_value,
-        null,
         invite.capability_id,
         admissionClaim ? JSON.stringify(admissionClaim) : null
       ]

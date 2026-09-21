@@ -184,32 +184,23 @@ router.put(
         messageArchiveCircleMaxBytes?: number | null;
       }>(req);
 
+      if (serverName !== undefined) {
+        return res.status(400).json({
+          status: 'error',
+          error: { code: 'INVALID_REQUEST', message: 'Circle names must use encrypted shared metadata' }
+        } as ApiResponse);
+      }
+
       // Validate at least one field is provided
       const initialJoinInviteToken = joinInviteToken;
 
-      if (serverName === undefined && publicBaseUrl === undefined && joinInviteToken === undefined && messageTtlHours === undefined && chatEpochRotationIntervalHours === undefined && chatEpochKeyRetentionHours === undefined && extraTrustedClientOrigins === undefined && attachmentsEnabled === undefined && maxAttachmentFileSizeBytes === undefined && attachmentStorageQuotaBytes === undefined && attachmentRetentionSeconds === undefined && membersCanUseGuestServerAttachments === undefined && messageArchiveServerPolicy === undefined && messageArchiveServerMaxBytes === undefined && messageArchiveCirclePolicy === undefined && messageArchiveCircleMaxBytes === undefined) {
+      if (publicBaseUrl === undefined && joinInviteToken === undefined && messageTtlHours === undefined && chatEpochRotationIntervalHours === undefined && chatEpochKeyRetentionHours === undefined && extraTrustedClientOrigins === undefined && attachmentsEnabled === undefined && maxAttachmentFileSizeBytes === undefined && attachmentStorageQuotaBytes === undefined && attachmentRetentionSeconds === undefined && membersCanUseGuestServerAttachments === undefined && messageArchiveServerPolicy === undefined && messageArchiveServerMaxBytes === undefined && messageArchiveCirclePolicy === undefined && messageArchiveCircleMaxBytes === undefined) {
         return res.status(400).json({
           status: 'error',
           error: {
             code: 'INVALID_REQUEST',
             message: 'At least one config field must be provided'
           }
-        } as ApiResponse);
-      }
-
-      const normalizedServerName = serverName !== undefined ? String(serverName).trim() : undefined;
-
-      // Validate serverName if provided
-      if (serverName !== undefined && typeof serverName !== 'string') {
-        return res.status(400).json({
-          status: 'error',
-          error: { code: 'INVALID_REQUEST', message: 'serverName must be a string' }
-        } as ApiResponse);
-      }
-      if (normalizedServerName !== undefined && (!normalizedServerName || normalizedServerName.length > 120)) {
-        return res.status(400).json({
-          status: 'error',
-          error: { code: 'INVALID_REQUEST', message: 'serverName is required and must be <= 120 chars' }
         } as ApiResponse);
       }
 
@@ -351,7 +342,6 @@ router.put(
 
       // Update family config
       const updatedConfig = await configService.updateFamilyConfig(familyId, {
-        serverName: normalizedServerName,
         publicBaseUrl: publicBaseUrl ?? undefined,
         firstOwnerInviteToken: initialJoinInviteToken,
         messageTtlHours: messageTtlHours !== undefined ? Number(messageTtlHours) : undefined,
@@ -393,128 +383,5 @@ router.put(
   }
 );
 
-/**
- * Create or update family configuration (admin only)
- * Useful for multi-tenancy mode initialization
- */
-router.post(
-  '/family-config/upsert',
-  verifySignature,
-  requireActiveIdentity,
-  requireAdmin,
-  async (req: AuthRequest<{
-    serverName?: string;
-    publicBaseUrl?: string | null;
-    joinInviteToken?: string | null;
-    messageTtlHours?: number;
-    extraTrustedClientOrigins?: string[];
-    attachmentsEnabled?: boolean;
-    maxAttachmentFileSizeBytes?: number | null;
-    attachmentStorageQuotaBytes?: number | null;
-    attachmentRetentionSeconds?: number | null;
-  }> & TenancyRequest, res) => {
-    try {
-      const familyId = req.familyId;
-
-      if (!familyId) {
-        return res.status(500).json({
-          status: 'error',
-          error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' }
-        } as ApiResponse);
-      }
-
-      const { serverName, publicBaseUrl, joinInviteToken, messageTtlHours, extraTrustedClientOrigins, attachmentsEnabled, maxAttachmentFileSizeBytes, attachmentStorageQuotaBytes, attachmentRetentionSeconds } = getSignedPayload<{
-        serverName?: string;
-        publicBaseUrl?: string | null;
-        joinInviteToken?: string | null;
-        messageTtlHours?: number;
-        extraTrustedClientOrigins?: string[];
-        attachmentsEnabled?: boolean;
-        maxAttachmentFileSizeBytes?: number | null;
-        attachmentStorageQuotaBytes?: number | null;
-        attachmentRetentionSeconds?: number | null;
-      }>(req);
-
-      // Validate serverName is required for upsert
-      if (!serverName || typeof serverName !== 'string') {
-        return res.status(400).json({
-          status: 'error',
-          error: { code: 'INVALID_REQUEST', message: 'serverName is required and must be a string' }
-        } as ApiResponse);
-      }
-
-      const attachmentFileSizeValidationError = validateConfiguredAttachmentMaxFileSize(
-        maxAttachmentFileSizeBytes !== undefined && maxAttachmentFileSizeBytes !== null ? Number(maxAttachmentFileSizeBytes) : maxAttachmentFileSizeBytes
-      );
-      if (attachmentFileSizeValidationError) {
-        return res.status(400).json({
-          status: 'error',
-          error: { code: 'INVALID_REQUEST', message: attachmentFileSizeValidationError }
-        } as ApiResponse);
-      }
-
-      const initialJoinInviteToken = joinInviteToken;
-
-      // Upsert family config
-      const familyConfig = await configService.upsertFamilyConfig({
-        familyId,
-        serverName,
-        publicBaseUrl: publicBaseUrl || null,
-        firstOwnerInviteToken: initialJoinInviteToken || null,
-        extraTrustedClientOrigins: Array.isArray(extraTrustedClientOrigins)
-          ? extraTrustedClientOrigins.map((value) => String(value).trim()).filter(Boolean)
-          : [],
-        attachmentsEnabled,
-        maxAttachmentFileSizeBytes: maxAttachmentFileSizeBytes !== undefined && maxAttachmentFileSizeBytes !== null ? Number(maxAttachmentFileSizeBytes) : maxAttachmentFileSizeBytes,
-        attachmentStorageQuotaBytes: attachmentStorageQuotaBytes !== undefined && attachmentStorageQuotaBytes !== null ? Number(attachmentStorageQuotaBytes) : attachmentStorageQuotaBytes,
-        attachmentRetentionSeconds: attachmentRetentionSeconds !== undefined && attachmentRetentionSeconds !== null ? Number(attachmentRetentionSeconds) : attachmentRetentionSeconds
-      });
-
-      const effectiveConfig = (messageTtlHours !== undefined || attachmentsEnabled !== undefined || maxAttachmentFileSizeBytes !== undefined || attachmentStorageQuotaBytes !== undefined || attachmentRetentionSeconds !== undefined)
-        ? await configService.updateFamilyConfig(familyId, {
-            messageTtlHours: messageTtlHours !== undefined ? Number(messageTtlHours) : undefined,
-            attachmentsEnabled,
-            maxAttachmentFileSizeBytes: maxAttachmentFileSizeBytes !== undefined && maxAttachmentFileSizeBytes !== null ? Number(maxAttachmentFileSizeBytes) : maxAttachmentFileSizeBytes,
-            attachmentStorageQuotaBytes: attachmentStorageQuotaBytes !== undefined && attachmentStorageQuotaBytes !== null ? Number(attachmentStorageQuotaBytes) : attachmentStorageQuotaBytes,
-            attachmentRetentionSeconds: attachmentRetentionSeconds !== undefined && attachmentRetentionSeconds !== null ? Number(attachmentRetentionSeconds) : attachmentRetentionSeconds
-          })
-        : familyConfig;
-
-      return res.json({
-        status: 'ok',
-        result: {
-          familyId: effectiveConfig?.family_id || familyConfig.family_id,
-          serverName: effectiveConfig?.server_name || familyConfig.server_name,
-          publicBaseUrl: effectiveConfig?.public_base_url ?? familyConfig.public_base_url,
-          joinInviteToken: effectiveConfig?.first_owner_invite_token ?? familyConfig.first_owner_invite_token,
-          messageTtlHours: effectiveConfig?.message_ttl_hours || familyConfig.message_ttl_hours,
-          extraTrustedClientOrigins: effectiveConfig?.extra_trusted_client_origins || familyConfig.extra_trusted_client_origins || [],
-          attachmentsEnabled: effectiveConfig?.attachments_enabled ?? familyConfig.attachments_enabled,
-          maxAttachmentFileSizeBytes: effectiveConfig?.max_attachment_file_size_bytes ?? familyConfig.max_attachment_file_size_bytes,
-          attachmentStorageQuotaBytes: effectiveConfig?.attachment_storage_quota_bytes ?? familyConfig.attachment_storage_quota_bytes,
-          attachmentRetentionSeconds: effectiveConfig?.attachment_retention_seconds ?? familyConfig.attachment_retention_seconds,
-          usedAttachmentStorageBytes: effectiveConfig?.used_attachment_storage_bytes ?? familyConfig.used_attachment_storage_bytes,
-          reservedAttachmentStorageBytes: effectiveConfig?.reserved_attachment_storage_bytes ?? familyConfig.reserved_attachment_storage_bytes,
-          createdAt: effectiveConfig?.created_at || familyConfig.created_at,
-          updatedAt: effectiveConfig?.updated_at || familyConfig.updated_at
-        }
-      } as ApiResponse);
-
-    } catch (error) {
-      routeLogger.error('Upsert family config error:', error);
-      return res.status(500).json({
-        status: 'error',
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: 'Failed to upsert family configuration'
-        }
-      } as ApiResponse);
-    }
-  }
-);
-
-/**
- * Get all users (admin only)
- */
 
 export default router;

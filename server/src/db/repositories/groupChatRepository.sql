@@ -1,7 +1,3 @@
-/* @name CreateGroupChat */
-INSERT INTO group_chats (chat_id, family_id, title_ciphertext, owner_identity_id, created_at, updated_at, key_epoch)
-VALUES (:chatId, :familyId, :titleCiphertext, :ownerIdentityId, :createdAt, :updatedAt, 1);
-
 /* @name InsertGroupChatParticipant */
 INSERT INTO group_chat_participants
   (chat_id, family_id, identity_id, added_by_identity_id, joined_at, is_active, join_order)
@@ -44,13 +40,6 @@ WHERE family_id = :familyId
   AND chat_id = :chatId
   AND identity_id = :identityId;
 
-/* @name RenameGroupChat */
-UPDATE group_chats
-SET title_ciphertext = :titleCiphertext,
-    updated_at = :updatedAt
-WHERE family_id = :familyId
-  AND chat_id = :chatId;
-
 /* @name ReactivateGroupChatParticipant */
 UPDATE group_chat_participants
 SET is_active = TRUE,
@@ -69,31 +58,6 @@ SET is_active = FALSE,
 WHERE family_id = :familyId
   AND chat_id = :chatId
   AND identity_id = :identityId;
-
-/* @name SetGroupChatOwner */
-UPDATE group_chats
-SET owner_identity_id = :ownerIdentityId,
-    updated_at = :updatedAt
-WHERE family_id = :familyId
-  AND chat_id = :chatId;
-
-/* @name BumpGroupChatKeyEpoch */
-UPDATE group_chats
-SET key_epoch = key_epoch + 1,
-    updated_at = :updatedAt,
-    key_epoch_updated_at = :updatedAt
-WHERE family_id = :familyId
-  AND chat_id = :chatId
-RETURNING key_epoch;
-
-/* @name FindNextGroupChatOwner */
-SELECT identity_id
-FROM group_chat_participants
-WHERE family_id = :familyId
-  AND chat_id = :chatId
-  AND is_active = TRUE
-ORDER BY join_order ASC
-LIMIT 1;
 
 /* @name FindGroupChatMessageByClientMessageId */
 SELECT message_id, created_at
@@ -169,12 +133,6 @@ WHERE p.family_id::text = :familyId::text
   AND p.chat_id = :chatId::text
   AND p.is_active = TRUE
 ORDER BY p.join_order ASC;
-
-/* @name ClaimGroupChatEpochKey */
-INSERT INTO group_chat_epoch_keys (chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at)
-VALUES (:chatId, :familyId, :epoch, :keyCommitment, :proposerIdentityId, :proposerDeviceId, :signedEpochTransition::jsonb, :createdAt)
-ON CONFLICT (chat_id, family_id, epoch) DO NOTHING
-RETURNING chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at;
 
 /* @name FindGroupChatEpochKey */
 SELECT chat_id, family_id, epoch, key_commitment, proposer_identity_id, proposer_device_id, signed_epoch_transition, created_at

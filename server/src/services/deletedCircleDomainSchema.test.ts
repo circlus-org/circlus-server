@@ -44,4 +44,15 @@ describe('deleted Circle domain tombstone schema', () => {
     expect(indexOf('announcement_channels')).toBeLessThan(indexOf('direct_guest_links'));
     expect(indexOf('announcement_channel_posts')).toBeLessThan(indexOf('identities'));
   });
+
+  it('clears an old deletion tombstone when its host is assigned to a new Circle', () => {
+    const repository = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/db/repositories/familyDomainRepository.ts'),
+      'utf8'
+    );
+    expect(repository).toContain('DELETE FROM deleted_circle_domains WHERE host = $1');
+    expect(repository).not.toContain(
+      'DELETE FROM deleted_circle_domains WHERE family_id = $1 AND host = $2'
+    );
+  });
 });

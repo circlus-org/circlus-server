@@ -1,14 +1,23 @@
 import { Router } from 'express';
 import type {
   ApiResponse,
+  CircleEncryptedSharedMetadata,
   CircleEncryptedIdentityProfile,
   CircleMembershipStateRecord,
   CircleProfileEpochClaim,
   CircleProfileEpochEnvelope,
   ErrorCode,
+  PublicKey,
 } from '../../../shared/types';
 import { query, transaction } from '../db';
-import { getSignedPayload, requireActiveIdentity, verifySignature, type AuthRequest } from '../middleware/auth';
+import {
+  getSignedPayload,
+  requireActiveIdentity,
+  requireAdmin,
+  requireFullCircleIdentity,
+  verifySignature,
+  type AuthRequest,
+} from '../middleware/auth';
 import { listCircleIdentityAdmissionProofs } from '../services/circleMembershipProofService';
 import {
   appendCircleMembershipState,
@@ -22,8 +31,23 @@ import { circleProfileAvatarBlobId } from '../services/circleProfileAvatarPublic
 import { notifyCircleDirectoryChanged } from '../services/circleDirectoryNotificationService';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 import type { TenancyRequest } from '../middleware/tenancy';
+import { createRateLimiter, deviceFamilyKey, ipFamilyKey } from '../middleware/rateLimit';
+import { getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
 
 const router = Router();
+const directoryRateLimits = getRateLimitRuntimeConfig().identities;
+const rlDirectoryIp = createRateLimiter({
+  name: 'circle-membership:directory-ip',
+  windowMs: directoryRateLimits.windowMs,
+  max: directoryRateLimits.directoryMax * 10,
+  keyFn: ipFamilyKey,
+});
+const rlDirectoryDevice = createRateLimiter({
+  name: 'circle-membership:directory-device',
+  windowMs: directoryRateLimits.windowMs,
+  max: directoryRateLimits.directoryMax,
+  keyFn: deviceFamilyKey,
+});
 
 router.post('/head', verifySignature, requireActiveIdentity, async (req: AuthRequest, res) => {
   try {
@@ -38,6 +62,7 @@ router.post('/head', verifySignature, requireActiveIdentity, async (req: AuthReq
       profile_envelope_count: string | number;
       profile_count: string | number;
       profile_revision_sum: string | number;
+      shared_metadata_revision: string | number | null;
     }>(
       `SELECT
          (SELECT state_id FROM circle_membership_states WHERE family_id = $1 ORDER BY sequence DESC LIMIT 1) AS membership_state_id,
@@ -46,7 +71,8 @@ router.post('/head', verifySignature, requireActiveIdentity, async (req: AuthReq
          (SELECT COUNT(*) FROM circle_profile_epochs WHERE family_id = $1) AS profile_epoch_count,
          (SELECT COUNT(*) FROM circle_profile_epoch_envelopes WHERE family_id = $1) AS profile_envelope_count,
          (SELECT COUNT(*) FROM circle_encrypted_identity_profiles WHERE family_id = $1) AS profile_count,
-         (SELECT COALESCE(SUM(revision), 0)::text FROM circle_encrypted_identity_profiles WHERE family_id = $1) AS profile_revision_sum`,
+         (SELECT COALESCE(SUM(revision), 0)::text FROM circle_encrypted_identity_profiles WHERE family_id = $1) AS profile_revision_sum,
+         (SELECT revision FROM circle_encrypted_shared_metadata WHERE family_id = $1) AS shared_metadata_revision`,
       [req.familyId]
     );
     const row = result.rows[0];
@@ -60,6 +86,7 @@ router.post('/head', verifySignature, requireActiveIdentity, async (req: AuthReq
         profileEnvelopeCount: Number(row?.profile_envelope_count || 0),
         profileCount: Number(row?.profile_count || 0),
         profileRevisionSum: String(row?.profile_revision_sum || '0'),
+        sharedMetadataRevision: Number(row?.shared_metadata_revision || 0),
       },
     } as ApiResponse);
   } catch (error) {
@@ -84,6 +111,32 @@ router.post('/state', verifySignature, requireActiveIdentity, async (req: AuthRe
   }
 });
 
+router.post('/directory', rlDirectoryIp, verifySignature, requireActiveIdentity, requireFullCircleIdentity, rlDirectoryDevice, async (req: AuthRequest, res) => {
+  try {
+    if (!req.familyId) {
+      return res.status(500).json({ status: 'error', error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' } } as ApiResponse);
+    }
+    const [membershipProofs, membershipStates] = await Promise.all([
+      listCircleIdentityAdmissionProofs(req.familyId),
+      listCircleMembershipStates(req.familyId),
+    ]);
+    const members = membershipProofs
+      .filter((proof) => proof.status === 'active' && proof.role !== 'guest')
+      .map((proof) => ({ identityId: proof.identityId, publicKey: proof.publicKey }));
+    return res.json({
+      status: 'ok',
+      result: { members, membershipProofs, membershipStates },
+    } as ApiResponse<{
+      members: Array<{ identityId: string; publicKey: PublicKey }>;
+      membershipProofs: Awaited<ReturnType<typeof listCircleIdentityAdmissionProofs>>;
+      membershipStates: Awaited<ReturnType<typeof listCircleMembershipStates>>;
+    }>);
+  } catch (error) {
+    routeLogger.error('Circle directory load error:', error);
+    return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Unable to load Circle directory' } } as ApiResponse);
+  }
+});
+
 type ProfileEpochRow = {
   claim: CircleProfileEpochClaim;
 };
@@ -104,6 +157,14 @@ type EncryptedProfileRow = {
   source_revision: number | null;
   publication_id: string;
   publication_kind: 'manual' | 'republish';
+  ciphertext: string;
+  updated_at: Date;
+};
+
+type EncryptedSharedMetadataRow = {
+  owner_identity_id: string;
+  epoch: number;
+  revision: number;
   ciphertext: string;
   updated_at: Date;
 };
@@ -132,12 +193,22 @@ function mapEncryptedProfile(row: EncryptedProfileRow): CircleEncryptedIdentityP
   };
 }
 
+function mapEncryptedSharedMetadata(row: EncryptedSharedMetadataRow): CircleEncryptedSharedMetadata {
+  return {
+    ownerIdentityId: row.owner_identity_id,
+    epoch: Number(row.epoch),
+    revision: Number(row.revision),
+    ciphertext: row.ciphertext,
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
 router.post('/profile-state', verifySignature, requireActiveIdentity, async (req: AuthRequest, res) => {
   try {
     if (!req.familyId || !req.identity?.identityId) {
       return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Circle identity is required' } } as ApiResponse);
     }
-    const [epochs, envelopes, epochRecipients, profiles] = await Promise.all([
+    const [epochs, envelopes, epochRecipients, profiles, sharedMetadata] = await Promise.all([
       query<ProfileEpochRow>(
         `SELECT claim FROM circle_profile_epochs WHERE family_id = $1 ORDER BY epoch ASC`,
         [req.familyId]
@@ -162,6 +233,12 @@ router.post('/profile-state', verifySignature, requireActiveIdentity, async (req
           ORDER BY updated_at DESC`,
         [req.familyId]
       ),
+      query<EncryptedSharedMetadataRow>(
+        `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
+           FROM circle_encrypted_shared_metadata
+          WHERE family_id = $1`,
+        [req.familyId]
+      ),
     ]);
     return res.json({
       status: 'ok',
@@ -170,11 +247,67 @@ router.post('/profile-state', verifySignature, requireActiveIdentity, async (req
         envelopes: envelopes.rows.map(mapEpochEnvelope),
         epochRecipients: epochRecipients.rows.map((row) => ({ epoch: Number(row.epoch), recipientIdentityId: row.recipient_identity_id })),
         profiles: profiles.rows.map(mapEncryptedProfile),
+        sharedMetadata: sharedMetadata.rows[0] ? mapEncryptedSharedMetadata(sharedMetadata.rows[0]) : null,
       },
     } as ApiResponse);
   } catch (error) {
     routeLogger.error('Circle encrypted profile state load error:', error);
     return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Unable to load encrypted Circle profiles' } } as ApiResponse);
+  }
+});
+
+router.post('/shared-metadata/publish', verifySignature, requireActiveIdentity, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    if (!req.familyId || !req.identity?.identityId) {
+      return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Circle owner identity is required' } } as ApiResponse);
+    }
+    const metadata = getSignedPayload<{ metadata?: Partial<CircleEncryptedSharedMetadata> }>(req).metadata;
+    const ownerIdentityId = typeof metadata?.ownerIdentityId === 'string' ? metadata.ownerIdentityId.trim() : '';
+    const epoch = Number(metadata?.epoch);
+    const revision = Number(metadata?.revision);
+    const ciphertext = typeof metadata?.ciphertext === 'string' ? metadata.ciphertext.trim() : '';
+    if (ownerIdentityId !== req.identity.identityId || !Number.isSafeInteger(epoch) || epoch < 1
+      || !Number.isSafeInteger(revision) || revision < 1 || !ciphertext || ciphertext.length > 16384) {
+      return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Invalid encrypted Circle metadata' } } as ApiResponse);
+    }
+    const result = await transaction(async (client) => {
+      const latestEpoch = await client.query<{ epoch: number }>(
+        `SELECT epoch FROM circle_profile_epochs WHERE family_id = $1 ORDER BY epoch DESC LIMIT 1 FOR UPDATE`,
+        [req.familyId]
+      );
+      if (Number(latestEpoch.rows[0]?.epoch) !== epoch) return { conflict: true as const };
+      const current = await client.query<EncryptedSharedMetadataRow>(
+        `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
+           FROM circle_encrypted_shared_metadata WHERE family_id = $1 FOR UPDATE`,
+        [req.familyId]
+      );
+      const previous = current.rows[0];
+      if (previous && revision <= Number(previous.revision)) {
+        return { conflict: false as const, applied: false, metadata: mapEncryptedSharedMetadata(previous) };
+      }
+      const saved = await client.query<EncryptedSharedMetadataRow>(
+        `INSERT INTO circle_encrypted_shared_metadata
+           (family_id, owner_identity_id, epoch, revision, ciphertext)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (family_id) DO UPDATE SET
+           owner_identity_id = EXCLUDED.owner_identity_id,
+           epoch = EXCLUDED.epoch,
+           revision = EXCLUDED.revision,
+           ciphertext = EXCLUDED.ciphertext,
+           updated_at = NOW()
+         RETURNING owner_identity_id, epoch, revision, ciphertext, updated_at`,
+        [req.familyId, ownerIdentityId, epoch, revision, ciphertext]
+      );
+      return { conflict: false as const, applied: true, metadata: mapEncryptedSharedMetadata(saved.rows[0]!) };
+    });
+    if (result.conflict) {
+      return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE', message: 'Circle profile epoch changed' } } as ApiResponse);
+    }
+    if (result.applied) await notifyCircleDirectoryChanged(req.familyId, 'profile');
+    return res.json({ status: 'ok', result: { applied: result.applied, metadata: result.metadata } } as ApiResponse);
+  } catch (error) {
+    routeLogger.error('Encrypted Circle metadata publish error:', error);
+    return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Unable to publish encrypted Circle metadata' } } as ApiResponse);
   }
 });
 

@@ -15,7 +15,8 @@ import {
   verifySignature,
   type AuthRequest,
 } from '../middleware/auth';
-import type { ApiResponse, ErrorCode } from '../../../shared/types';
+import type { ApiResponse, ErrorCode, PublicKey, SignedRequest } from '../../../shared/types';
+import { verifySignedRequest } from '../utils/crypto';
 import { publicSiteGeneratorService } from '../services/publicSiteGeneratorService';
 import { getRequestHost } from '../middleware/tenancy';
 import { isBlockedManagedHost } from '../utils/publicSiteDomainPolicy';
@@ -41,11 +42,42 @@ function channelResult(
   return {
     channelId: channel.channel_id,
     ownerIdentityId: channel.owner_identity_id,
+    // Display metadata is resolved from the encrypted payload by clients.
+    title: '',
+    description: null,
     authorIsCircleOwner: channel.author_is_circle_owner === true,
     authorManagesServer,
-    title: channel.title,
-    description: channel.description,
-    contentMode: channel.content_mode,
+    metadata: channel.metadata_ciphertext && channel.metadata_epoch && channel.metadata_author_claim
+      ? {
+          epoch: Number(channel.metadata_epoch),
+          revision: Number(channel.metadata_revision),
+          ciphertext: channel.metadata_ciphertext,
+          authorDeviceId: channel.metadata_author_device_id,
+          authorClaim: channel.metadata_author_claim,
+          authorDevicePublicKey: channel.metadata_author_device_public_key_algorithm
+            && channel.metadata_author_device_public_key_value
+            ? {
+                algorithm: channel.metadata_author_device_public_key_algorithm,
+                value: channel.metadata_author_device_public_key_value,
+              }
+            : null,
+          authorDeviceEncryptionPublicKey: channel.metadata_author_device_encryption_public_key_algorithm
+            && channel.metadata_author_device_encryption_public_key_value
+            ? {
+                algorithm: channel.metadata_author_device_encryption_public_key_algorithm,
+                value: channel.metadata_author_device_encryption_public_key_value,
+              }
+            : null,
+          authorDeviceRegistrationAttestation: channel.metadata_author_device_registration_attestation || null,
+          authorIdentityPublicKey: channel.metadata_author_identity_public_key_algorithm
+            && channel.metadata_author_identity_public_key_value
+            ? {
+                algorithm: channel.metadata_author_identity_public_key_algorithm,
+                value: channel.metadata_author_identity_public_key_value,
+              }
+            : null,
+        }
+      : null,
     reactionsEnabled: channel.reactions_enabled === true,
     subscription: channel.subscription_id
       ? {
@@ -62,16 +94,10 @@ function channelResult(
     keyEpoch: Number(channel.key_epoch || 1),
     ...(isChannelOwner
       ? {
-          visibility: channel.visibility,
           isDefault: channel.is_default,
           status: channel.status,
           linkCount: Number(channel.link_count || 0),
           subscriberCount: Number(channel.subscriber_count || 0),
-          audience: {
-            membersCanSubscribe: channel.members_can_subscribe === true,
-            ownerGuestsCanSubscribe: channel.owner_guests_can_subscribe === true,
-            otherGuestsCanSubscribe: channel.other_guests_can_subscribe === true,
-          },
           updatedAt: channel.updated_at.toISOString(),
           serverAdminDisclosureEnabled: channel.disclose_server_admin_status === true,
           canDiscloseServerAdmin: channel.author_is_circle_owner === true
@@ -199,19 +225,9 @@ router.post('/create', verifySignature, requireActiveIdentity, reliableOperation
         error: { code: 'FORBIDDEN' as ErrorCode, message: 'Only Circle members can create channels' }
       } as ApiResponse);
     }
-    const payload = getSignedPayload<{ title?: unknown; description?: unknown }>(req);
-    const title = normalizeText(payload.title, 160);
-    if (!title) {
-      return res.status(400).json({
-        status: 'error',
-        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Channel title is required' }
-      } as ApiResponse);
-    }
     const channel = await announcementChannelRepository.create({
       familyId,
       ownerIdentityId: identityId,
-      title,
-      description: normalizeText(payload.description, 2000),
     });
     const visible = await announcementChannelRepository.listVisibleForIdentity({
       familyId,
@@ -244,12 +260,27 @@ router.post('/:channelId/update', verifySignature, requireActiveIdentity, async 
         error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'channelId is required' }
       } as ApiResponse);
     }
-    const payload = getSignedPayload<{ title?: unknown; description?: unknown }>(req);
-    const title = normalizeText(payload.title, 160);
-    if (!title) {
+    const payload = getSignedPayload<{
+      epoch?: unknown;
+      expectedRevision?: unknown;
+      ciphertext?: unknown;
+      authorClaim?: SignedRequest<Record<string, unknown>>;
+    }>(req);
+    const epoch = Number(payload.epoch);
+    const expectedRevision = Number(payload.expectedRevision);
+    const ciphertext = typeof payload.ciphertext === 'string' ? payload.ciphertext : '';
+    const claimPayload = { version: 1, channelId, epoch, expectedRevision, ciphertext };
+    if (!Number.isSafeInteger(epoch) || epoch < 1
+      || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0
+      || !ciphertext.startsWith('gcm1:') || ciphertext.length > 65_536
+      || !payload.authorClaim
+      || payload.authorClaim.type !== 'channel:metadata:update'
+      || payload.authorClaim.signerId !== req.device?.deviceId
+      || JSON.stringify(payload.authorClaim.payload) !== JSON.stringify(claimPayload)
+      || !verifySignedRequest(payload.authorClaim, req.device?.publicKey as PublicKey)) {
       return res.status(400).json({
         status: 'error',
-        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Channel title is required' }
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Valid encrypted channel metadata is required' }
       } as ApiResponse);
     }
     const channel = await announcementChannelRepository.findById(familyId, channelId);
@@ -259,16 +290,21 @@ router.post('/:channelId/update', verifySignature, requireActiveIdentity, async 
         error: { code: 'NOT_FOUND' as ErrorCode, message: 'Announcement channel not found' }
       } as ApiResponse);
     }
-    const updated = await announcementChannelRepository.updateDetails({
+    const updated = await announcementChannelRepository.updateMetadata({
       familyId,
       channelId,
       ownerIdentityId: identityId,
-      title,
-      description: normalizeText(payload.description, 2000),
+      epoch,
+      expectedRevision,
+      ciphertext,
+      authorDeviceId: req.device!.deviceId,
+      authorClaim: payload.authorClaim,
     });
-    if (!updated) throw new Error('Failed to update announcement channel');
-    if (channel.public_site_visible) {
-      await publicSiteGeneratorService.regenerateSite(familyId);
+    if (!updated) {
+      return res.status(409).json({ status: 'error', error: {
+        code: 'INVALID_STATE' as ErrorCode,
+        message: 'Channel metadata revision or key epoch changed'
+      } } as ApiResponse);
     }
     const visible = await announcementChannelRepository.listVisibleForIdentity({
       familyId,
@@ -287,53 +323,6 @@ router.post('/:channelId/update', verifySignature, requireActiveIdentity, async 
       status: 'error',
       error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' }
     } as ApiResponse);
-  }
-});
-
-router.post('/:channelId/audience', verifySignature, requireActiveIdentity, async (req: AuthRequest, res) => {
-  try {
-    const familyId = req.familyId;
-    const identityId = req.identity?.identityId;
-    const channelId = String(req.params.channelId || '').trim();
-    const payload = getSignedPayload<{
-      membersCanSubscribe?: unknown;
-      ownerGuestsCanSubscribe?: unknown;
-      otherGuestsCanSubscribe?: unknown;
-    }>(req);
-    if (!familyId || !identityId || !channelId
-      || typeof payload.membersCanSubscribe !== 'boolean'
-      || typeof payload.ownerGuestsCanSubscribe !== 'boolean'
-      || typeof payload.otherGuestsCanSubscribe !== 'boolean') {
-      return res.status(400).json({
-        status: 'error',
-        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Complete channel audience settings are required' }
-      } as ApiResponse);
-    }
-    const updated = await announcementChannelRepository.updateAudience({
-      familyId,
-      channelId,
-      ownerIdentityId: identityId,
-      membersCanSubscribe: payload.membersCanSubscribe,
-      ownerGuestsCanSubscribe: payload.ownerGuestsCanSubscribe,
-      otherGuestsCanSubscribe: payload.otherGuestsCanSubscribe,
-    });
-    if (!updated) {
-      return res.status(404).json({
-        status: 'error',
-        error: { code: 'NOT_FOUND' as ErrorCode, message: 'Announcement channel not found' }
-      } as ApiResponse);
-    }
-    const visible = await announcementChannelRepository.listVisibleForIdentity({
-      familyId,
-      identityId,
-      role: req.identity?.role,
-    });
-    const result = visible.find((item) => item.channel_id === channelId);
-    if (!result) throw new Error('Updated channel is not visible to its owner');
-    return res.json({ status: 'ok', result: channelResult(result, identityId, req.identity?.role) } as ApiResponse);
-  } catch (error) {
-    routeLogger.error('Update channel audience error:', error);
-    return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR' as ErrorCode, message: 'Internal server error' } } as ApiResponse);
   }
 });
 
@@ -435,7 +424,6 @@ router.post('/by-link/:linkId/ensure', verifySignature, requireActiveIdentity, a
       familyId,
       linkId,
       ownerIdentityId: identityId,
-      title: link.presentation_title,
     });
     const visible = await announcementChannelRepository.listVisibleForIdentity({
       familyId,
@@ -582,7 +570,7 @@ router.post('/:channelId/public-site', verifySignature, requireActiveIdentity, v
       visible: state === 'published',
       state,
       slug: payload.slug === undefined
-        ? (channel.public_site_slug || normalizeSlug(channel.title, channel.channel_id))
+        ? (channel.public_site_slug || normalizeSlug(channel.public_site_intro_title, channel.channel_id))
         : normalizeSlug(payload.slug, channel.channel_id),
       ctaLabel: payload.ctaLabel === undefined
         ? channel.public_site_cta_label
@@ -611,7 +599,7 @@ router.post('/:channelId/public-site', verifySignature, requireActiveIdentity, v
       if (circleOwner && circleOwner.identity_id !== identityId) {
         void sendChannelPublicationRequestPush(familyId, circleOwner.identity_id, {
           channelId,
-          channelTitle: channel.title,
+          channelTitle: channel.public_site_intro_title || 'Channel',
           requestingIdentityId: identityId,
           requestingIdentityName: undefined,
         }).catch((error) => {

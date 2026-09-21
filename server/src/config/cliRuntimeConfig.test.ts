@@ -49,6 +49,8 @@ describe('CLI runtime config', () => {
     const scripts = [
       'cleanup-expired-invites.ts',
       'create-server-admin-claim.ts',
+      'delete-tenant.ts',
+      'list-tenants.ts',
       'migrate.ts',
       'provision-tenant.ts'
     ];

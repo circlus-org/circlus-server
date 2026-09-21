@@ -516,7 +516,7 @@ export async function sendCircleOwnerChangedPush(
   params: {
     ownershipChangeId: string;
     circleName: string;
-    method: 'voluntary_transfer' | 'server_admin_recovery';
+    method: 'voluntary_transfer';
   }
 ): Promise<PushIdentityDeliveryResult> {
   const payload: PushPayload = withTimestamps({

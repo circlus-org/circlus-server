@@ -247,7 +247,6 @@ router.post('/registrations/:registrationId/revoke-impact', verifySignature, req
     });
     return res.json({ status: 'ok', result: impacts.map((impact) => ({
       channelId: impact.channel_id,
-      title: impact.title,
       keyEpoch: Number(impact.key_epoch || 1),
     })) } as ApiResponse);
   } catch (error) {

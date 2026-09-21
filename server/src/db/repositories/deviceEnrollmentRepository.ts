@@ -17,7 +17,6 @@ function mapEnrollment(row: FindDeviceEnrollmentByEnrollmentIdResult): DBDeviceE
     id: row.id,
     family_id: row.family_id,
     enrollment_id: row.enrollment_id,
-    requested_contact: row.requested_contact,
     requested_trusted_device_id: lifecycle.requested_trusted_device_id ?? null,
     requested_identity_id: lifecycle.requested_identity_id ?? null,
     new_device_ciphertext: row.new_device_ciphertext,

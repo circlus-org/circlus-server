@@ -15,7 +15,6 @@ export async function registerIdentityDevice(params: {
   devicePublicKey: PublicKey;
   deviceEncryptionPublicKey?: PublicKey;
   registrationAttestation: DeviceRegistrationAttestation | null;
-  label: string | null;
   webOrigin: string | null;
   encryptedPhysicalDeviceId: unknown | null;
 }) {
@@ -57,7 +56,6 @@ export async function registerIdentityDevice(params: {
         : null,
       encryptionPublicKeyValue: params.deviceEncryptionPublicKey?.value || null,
       registrationAttestation: params.registrationAttestation,
-      label: params.label,
       webOrigin: params.webOrigin,
       encryptedPhysicalDeviceId: params.encryptedPhysicalDeviceId
     }, client);

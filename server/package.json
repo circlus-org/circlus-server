@@ -18,6 +18,10 @@
     "server-admin:create-claim": "tsx src/scripts/create-server-admin-claim.ts",
     "server-admin:create-claim:prod": "node dist/server/src/scripts/create-server-admin-claim.js",
     "tenant:provision": "tsx src/scripts/provision-tenant.ts",
+    "tenant:list": "tsx src/scripts/list-tenants.ts",
+    "tenant:list:prod": "node dist/server/src/scripts/list-tenants.js",
+    "tenant:delete": "tsx src/scripts/delete-tenant.ts",
+    "tenant:delete:prod": "node dist/server/src/scripts/delete-tenant.js",
     "test:reliability": "node scripts/test-signed-operation-reliability.cjs",
     "test:ws-resources": "node scripts/test-ws-resource-guard.cjs",
     "test:http-signaling": "node scripts/test-http-signaling.cjs"

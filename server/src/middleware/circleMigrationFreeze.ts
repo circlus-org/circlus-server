@@ -30,8 +30,8 @@ function isReadAllowedDuringFreeze(method: string, path: string): boolean {
   if (method !== 'POST') return false;
   if ([
     '/config/server-name',
-    '/identities/settings',
-    '/identities/published',
+    '/identities/presence-settings',
+    '/circle-membership/directory',
     '/messages/key/fetch',
     '/messages/list',
     '/messages/reactions/list',

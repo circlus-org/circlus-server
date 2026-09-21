@@ -26,7 +26,7 @@ function parseArgs(): Options {
   const options: Options = {
     host: '',
     serverName: 'Family Server',
-    noNamesOnServer: false,
+    noNamesOnServer: true,
     ownerClaimTtlHours: 72,
     joinInviteTtlHours: 72
   };
@@ -38,7 +38,11 @@ function parseArgs(): Options {
     } else if (key === '--server-name') {
       options.serverName = value || options.serverName;
     } else if (key === '--no-names-on-server') {
-      options.noNamesOnServer = booleanArgument(value, key, false);
+      const requested = booleanArgument(value, key, true);
+      if (!requested) {
+        throw new Error('--no-names-on-server=false is no longer supported; participant names are always client-encrypted');
+      }
+      options.noNamesOnServer = true;
     } else if (key === '--owner-claim-ttl-hours') {
       options.ownerClaimTtlHours = boundedIntegerArgument({
         value,

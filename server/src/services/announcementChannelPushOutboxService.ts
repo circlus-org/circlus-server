@@ -44,7 +44,7 @@ export async function processAnnouncementChannelPushOutboxOnce(): Promise<boolea
           subscriber.identity_id,
           job.post_id,
           job.author_identity_id,
-          channel.title,
+          'Channel',
           {
             channelId: job.channel_id,
             dialogId: job.channel_id,

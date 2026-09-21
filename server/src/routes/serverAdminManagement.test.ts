@@ -2,6 +2,7 @@ jest.mock('../services/reliableOperation', () => ({ reliableOperation: (handler:
 jest.mock('../middleware/auth', () => ({
   verifySignature: jest.fn((_req, _res, next) => next()),
   requireActiveIdentity: jest.fn((_req, _res, next) => next()),
+  requireFullCircleIdentity: jest.fn((_req, _res, next) => next()),
   requireServerAdmin: jest.fn((_req, _res, next) => next()),
   getSignedPayload: jest.fn((req) => req.signedRequest?.payload || {}),
 }));
@@ -24,13 +25,6 @@ jest.mock('../db/repositories', () => ({
     findAll: jest.fn(),
     findByIdentityId: jest.fn(),
     count: jest.fn(),
-  },
-  deviceRepository: {
-    findActiveByIdentityIds: jest.fn(),
-  },
-  circleOwnerRecoveryRepository: {
-    revokePending: jest.fn(),
-    createClaim: jest.fn(),
   },
   inviteRepository: {
     create: jest.fn(),
@@ -67,19 +61,11 @@ jest.mock('../utils/tenantDomainValidation', () => ({
   validateTenantDomainDns: jest.fn().mockResolvedValue({ ok: true }),
   validateTenantTlsCertificate: jest.fn().mockResolvedValue({ ok: true }),
 }));
-jest.mock('../services/circleOwnershipService', () => ({
-  CircleOwnershipError: class CircleOwnershipError extends Error {},
-  changeCircleOwnerToExistingIdentity: jest.fn(),
-  recoverCircleOwnerWithNewIdentity: jest.fn(),
-  deliverCircleOwnerChangedPush: jest.fn(),
-}));
 jest.mock('../ws/wsGateway', () => ({
   suspendCircleWsAccess: jest.fn().mockResolvedValue(undefined)
 }));
 
 import {
-  circleOwnerRecoveryRepository,
-  deviceRepository,
   familyConfigRepository,
   familyDomainRepository,
   identityRepository,
@@ -88,10 +74,6 @@ import {
   tenantOwnerClaimsRepository
 } from '../db/repositories';
 import { suspendCircleWsAccess } from '../ws/wsGateway';
-import {
-  changeCircleOwnerToExistingIdentity,
-  deliverCircleOwnerChangedPush
-} from '../services/circleOwnershipService';
 import { attachmentStorageService } from '../services/attachmentStorageService';
 import { publicSiteAssetStorageService } from '../services/publicSiteAssetStorageService';
 import {
@@ -103,16 +85,17 @@ const router = require('./serverAdmin').default;
 
 type MockResponse = { status: jest.Mock; json: jest.Mock };
 
+function findRoute(candidate: any, path: string): any {
+  for (const item of candidate.stack || []) {
+    if (item.route?.path === path) return item;
+    const nested = item.handle?.stack ? findRoute(item.handle, path) : null;
+    if (nested) return nested;
+  }
+  return null;
+}
+
 function getPostHandler(path: string) {
-  const findLayer = (candidate: any): any => {
-    for (const item of candidate.stack || []) {
-      if (item.route?.path === path) return item;
-      const nested = item.handle?.stack ? findLayer(item.handle) : null;
-      if (nested) return nested;
-    }
-    return null;
-  };
-  const layer = findLayer(router);
+  const layer = findRoute(router, path);
   return layer.route.stack[layer.route.stack.length - 1].handle as (req: any, res: MockResponse) => Promise<void>;
 }
 
@@ -136,6 +119,17 @@ function makeReq(payload: Record<string, unknown> = {}, overrides: Record<string
 
 describe('server administrator provisioning capabilities', () => {
   beforeEach(() => jest.clearAllMocks());
+
+  test('does not expose server-admin owner replacement or recovery claims', () => {
+    for (const path of [
+      '/tenants/:familyId/owner-recovery/options',
+      '/tenants/:familyId/owner-recovery/assign',
+      '/tenants/:familyId/owner-recovery/claims',
+      '/tenants/:familyId/owner-recovery/create-profile'
+    ]) {
+      expect(findRoute(router, path)).toBeNull();
+    }
+  });
 
   test.each([
     [undefined, false],
@@ -271,7 +265,7 @@ describe('tenant provisioning invites', () => {
     await getPostHandler('/tenants')(request, res);
 
     expect(familyConfigRepository.create).toHaveBeenCalledWith(expect.objectContaining({
-      serverName: 'Second Circle',
+      serverName: 'shared.example.test',
       publicBaseUrl: 'https://shared.example.test'
     }));
     expect(validateTenantDomainDns).not.toHaveBeenCalled();
@@ -600,99 +594,4 @@ describe('server admin profile management', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: 'ok' }));
   });
 
-  test('owner recovery options include active members but exclude guests', async () => {
-    (familyConfigRepository.findByFamilyId as jest.Mock).mockResolvedValue({
-      family_id: 'family_target',
-      server_name: 'Target',
-      public_base_url: 'https://target.example',
-      no_names_on_server: false,
-      status: 'active',
-      owner_identity_id: 'owner_old',
-    });
-    (identityRepository.findAll as jest.Mock).mockResolvedValue([
-      { identity_id: 'owner_old', identity_name: 'Old', role: 'owner', status: 'active' },
-      { identity_id: 'member_1', identity_name: 'Member', role: 'member', status: 'active' },
-      { identity_id: 'guest_1', identity_name: 'Guest', role: 'guest', status: 'active' },
-      { identity_id: 'disabled_1', identity_name: 'Disabled', role: 'member', status: 'disabled' },
-    ]);
-    (deviceRepository.findActiveByIdentityIds as jest.Mock).mockResolvedValue([
-      { identity_id: 'owner_old' },
-      { identity_id: 'member_1' },
-      { identity_id: 'member_1' },
-    ]);
-
-    const res = makeResponse();
-    await getPostHandler('/tenants/:familyId/owner-recovery/options')(
-      makeReq({}, { params: { familyId: 'family_target' } }),
-      res
-    );
-
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'ok',
-      result: expect.objectContaining({
-        currentOwner: expect.objectContaining({ identityId: 'owner_old', activeDeviceCount: 1 }),
-        candidates: [{ identityId: 'member_1', identityName: null, activeDeviceCount: 2 }],
-      }),
-    }));
-  });
-
-  test('assigns an active member through the audited server-admin recovery path', async () => {
-    (changeCircleOwnerToExistingIdentity as jest.Mock).mockResolvedValue({
-      changeId: 'change_1',
-      familyId: 'family_target',
-      recipients: ['owner_old', 'member_1'],
-    });
-    const req = makeReq(
-      { expectedOwnerIdentityId: 'owner_old', newOwnerIdentityId: 'member_1' },
-      { params: { familyId: 'family_target' } }
-    );
-    const res = makeResponse();
-
-    await getPostHandler('/tenants/:familyId/owner-recovery/assign')(req, res);
-
-    expect(changeCircleOwnerToExistingIdentity).toHaveBeenCalledWith(expect.objectContaining({
-      familyId: 'family_target',
-      expectedOwnerIdentityId: 'owner_old',
-      newOwnerIdentityId: 'member_1',
-      method: 'server_admin_recovery',
-      initiatedByIdentityId: 'current_admin',
-      initiatedByDeviceId: 'device_current',
-      initiatedByServerAdminId: 'sa_current',
-      signedAuthorization: req.signedRequest,
-    }));
-    expect(deliverCircleOwnerChangedPush).toHaveBeenCalled();
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: 'ok' }));
-  });
-
-  test('pins a one-time recovery link to the current owner', async () => {
-    (familyConfigRepository.findByFamilyId as jest.Mock).mockResolvedValue({
-      status: 'active',
-      owner_identity_id: 'owner_old',
-      public_base_url: 'https://target.example',
-    });
-    (circleOwnerRecoveryRepository.revokePending as jest.Mock).mockResolvedValue(undefined);
-    (circleOwnerRecoveryRepository.createClaim as jest.Mock).mockImplementation(async (params) => ({
-      claim_id: 'claim_1',
-      ...params,
-    }));
-    const req = makeReq(
-      { expectedOwnerIdentityId: 'owner_old', ttlHours: 24 },
-      { params: { familyId: 'family_target' } }
-    );
-    const res = makeResponse();
-
-    await getPostHandler('/tenants/:familyId/owner-recovery/claims')(req, res);
-
-    expect(circleOwnerRecoveryRepository.revokePending).toHaveBeenCalledWith('family_target');
-    expect(circleOwnerRecoveryRepository.createClaim).toHaveBeenCalledWith(expect.objectContaining({
-      familyId: 'family_target',
-      expectedOwnerIdentityId: 'owner_old',
-      createdByServerAdminId: 'sa_current',
-      createdAuthorization: req.signedRequest,
-    }));
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'ok',
-      result: expect.objectContaining({ claimId: 'claim_1', expectedOwnerIdentityId: 'owner_old' }),
-    }));
-  });
 });

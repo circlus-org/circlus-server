@@ -22,7 +22,6 @@ export interface FindByDeviceIdResult {
   family_id: string;
   id: string;
   identity_id: string;
-  label: string | null;
   last_seen_at: Date | null;
   public_key_algorithm: string;
   public_key_value: string;
@@ -67,7 +66,6 @@ export interface FindByPublicKeyResult {
   family_id: string;
   id: string;
   identity_id: string;
-  label: string | null;
   last_seen_at: Date | null;
   public_key_algorithm: string;
   public_key_value: string;
@@ -112,7 +110,6 @@ export interface FindByIdentityIdResult {
   family_id: string;
   id: string;
   identity_id: string;
-  label: string | null;
   last_seen_at: Date | null;
   public_key_algorithm: string;
   public_key_value: string;
@@ -158,7 +155,6 @@ export interface FindActiveByIdentityIdResult {
   family_id: string;
   id: string;
   identity_id: string;
-  label: string | null;
   last_seen_at: Date | null;
   public_key_algorithm: string;
   public_key_value: string;
@@ -187,81 +183,6 @@ const findActiveByIdentityIdIR: any = {"usedParamSet":{"identityId":true,"family
 export const findActiveByIdentityId = new PreparedQuery<FindActiveByIdentityIdParams,FindActiveByIdentityIdResult>(findActiveByIdentityIdIR);
 
 
-/** 'CreateDevice' parameters type */
-export interface CreateDeviceParams {
-  deviceId?: string | null | void;
-  encryptedPhysicalDeviceId?: Json | null | void;
-  encryptionPublicKeyAlgorithm?: string | null | void;
-  encryptionPublicKeyValue?: string | null | void;
-  familyId?: string | null | void;
-  identityId?: string | null | void;
-  label?: string | null | void;
-  publicKeyAlgorithm?: string | null | void;
-  publicKeyValue?: string | null | void;
-  registrationAttestation?: Json | null | void;
-  webOrigin?: string | null | void;
-}
-
-/** 'CreateDevice' return type */
-export interface CreateDeviceResult {
-  created_at: Date;
-  device_id: string;
-  encrypted_physical_device_id: Json | null;
-  encryption_public_key_algorithm: string | null;
-  encryption_public_key_value: string | null;
-  /** Family/tenant identifier for multi-tenancy isolation */
-  family_id: string;
-  id: string;
-  identity_id: string;
-  label: string | null;
-  last_seen_at: Date | null;
-  public_key_algorithm: string;
-  public_key_value: string;
-  registration_attestation: Json | null;
-  status: string;
-  web_origin: string | null;
-}
-
-/** 'CreateDevice' query type */
-export interface CreateDeviceQuery {
-  params: CreateDeviceParams;
-  result: CreateDeviceResult;
-}
-
-const createDeviceIR: any = {"usedParamSet":{"deviceId":true,"identityId":true,"familyId":true,"publicKeyAlgorithm":true,"publicKeyValue":true,"encryptionPublicKeyAlgorithm":true,"encryptionPublicKeyValue":true,"registrationAttestation":true,"label":true,"webOrigin":true,"encryptedPhysicalDeviceId":true},"params":[{"name":"deviceId","required":false,"transform":{"type":"scalar"},"locs":[{"a":268,"b":276}]},{"name":"identityId","required":false,"transform":{"type":"scalar"},"locs":[{"a":281,"b":291}]},{"name":"familyId","required":false,"transform":{"type":"scalar"},"locs":[{"a":296,"b":304}]},{"name":"publicKeyAlgorithm","required":false,"transform":{"type":"scalar"},"locs":[{"a":309,"b":327}]},{"name":"publicKeyValue","required":false,"transform":{"type":"scalar"},"locs":[{"a":332,"b":346}]},{"name":"encryptionPublicKeyAlgorithm","required":false,"transform":{"type":"scalar"},"locs":[{"a":351,"b":379}]},{"name":"encryptionPublicKeyValue","required":false,"transform":{"type":"scalar"},"locs":[{"a":384,"b":408}]},{"name":"registrationAttestation","required":false,"transform":{"type":"scalar"},"locs":[{"a":413,"b":436}]},{"name":"label","required":false,"transform":{"type":"scalar"},"locs":[{"a":441,"b":446}]},{"name":"webOrigin","required":false,"transform":{"type":"scalar"},"locs":[{"a":451,"b":460}]},{"name":"encryptedPhysicalDeviceId","required":false,"transform":{"type":"scalar"},"locs":[{"a":465,"b":490}]}],"statement":"INSERT INTO devices (\n  device_id,\n  identity_id,\n  family_id,\n  public_key_algorithm,\n  public_key_value,\n  encryption_public_key_algorithm,\n  encryption_public_key_value,\n  registration_attestation,\n  label,\n  web_origin,\n  encrypted_physical_device_id\n) VALUES (\n  :deviceId,\n  :identityId,\n  :familyId,\n  :publicKeyAlgorithm,\n  :publicKeyValue,\n  :encryptionPublicKeyAlgorithm,\n  :encryptionPublicKeyValue,\n  :registrationAttestation,\n  :label,\n  :webOrigin,\n  :encryptedPhysicalDeviceId\n) RETURNING *"};
-
-/**
- * Query generated from SQL:
- * ```
- * INSERT INTO devices (
- *   device_id,
- *   identity_id,
- *   family_id,
- *   public_key_algorithm,
- *   public_key_value,
- *   encryption_public_key_algorithm,
- *   encryption_public_key_value,
- *   registration_attestation,
- *   label,
- *   web_origin,
- *   encrypted_physical_device_id
- * ) VALUES (
- *   :deviceId,
- *   :identityId,
- *   :familyId,
- *   :publicKeyAlgorithm,
- *   :publicKeyValue,
- *   :encryptionPublicKeyAlgorithm,
- *   :encryptionPublicKeyValue,
- *   :registrationAttestation,
- *   :label,
- *   :webOrigin,
- *   :encryptedPhysicalDeviceId
- * ) RETURNING *
- * ```
- */
-export const createDevice = new PreparedQuery<CreateDeviceParams,CreateDeviceResult>(createDeviceIR);
-
 
 /** 'UpdateStatus' parameters type */
 export interface UpdateStatusParams {
@@ -281,7 +202,6 @@ export interface UpdateStatusResult {
   family_id: string;
   id: string;
   identity_id: string;
-  label: string | null;
   last_seen_at: Date | null;
   public_key_algorithm: string;
   public_key_value: string;

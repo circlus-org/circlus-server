@@ -47,11 +47,12 @@ export interface DBAttachmentBlob {
   chat_id: string | null;
   sender_identity_id: string | null;
   linked_message_id: string | null;
-  original_file_name: string;
+  blob_purpose: 'encrypted_payload' | 'public_presentation';
+  original_file_name: string | null;
   mime_type: string | null;
   plaintext_size_bytes: number;
   ciphertext_size_bytes: number;
-  plaintext_sha256: string | null;
+  ciphertext_sha256: string | null;
   storage_key: string;
   status: 'reserved' | 'uploaded' | 'committed' | 'pending_delete' | 'deleted' | 'expired';
   expires_at: Date;
@@ -107,13 +108,6 @@ export interface DBIdentity {
   can_create_invites: boolean;
   can_create_guest_invites: boolean;
 
-  // Legacy invite quota fields retained for backwards-compatible storage.
-  invite_quota: number;
-  invite_used: number;
-
-  // User status
-  status_text: string | null;
-  status_updated_at: Date | null;
 }
 
 export interface DBDevice {
@@ -139,10 +133,6 @@ export interface DBInvite {
   created_by: string;
   created_at: Date;
   expires_at: Date;
-  accepted_by_identity_id: string | null;
-  accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
-  accepted_at: Date | null;
   max_uses: number;
   used_count: number;
   status: 'active' | 'expired' | 'exhausted' | 'revoked';
@@ -262,7 +252,6 @@ export interface DBDeviceEnrollment {
   id: string;
   family_id: string;
   enrollment_id: string;
-  requested_contact: string | null;
   requested_trusted_device_id: string | null;
   requested_identity_id: string | null;
   new_device_ciphertext: string | null;

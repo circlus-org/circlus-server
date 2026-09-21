@@ -120,7 +120,7 @@ test('a missing or mismatched authenticated identity fails closed without consum
 test.each([
   'announcement-channels:read', 'announcement-channels:received', 'announcement-channels:subscribe',
   'announcement-channels:keys:claim', 'msg:http:status', 'msg:http:sync-ack',
-  'grp:messages:read', 'grp:keys:claim-or-publish', 'announcement-channels:future-operation'
+  'grp:messages:read', 'announcement-channels:future-operation'
 ])('%s is a mutation even when it accompanies reading', type => {
   expect(communicationRequestBudget(type)).toBe('write');
 });

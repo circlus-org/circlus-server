@@ -41,9 +41,7 @@ describe('compact link resolution', () => {
       sessionPublicKey: 'session-key',
       trustedDeviceId: 'device_1'
     };
-    for (let i = 0; i < 2; i += 1) {
-      (query as jest.Mock).mockResolvedValueOnce({ rows: [] });
-    }
+    (query as jest.Mock).mockResolvedValueOnce({ rows: [] });
     (query as jest.Mock).mockResolvedValueOnce({ rows: [{ bootstrap_payload: bootstrap }] });
     const res = response();
 

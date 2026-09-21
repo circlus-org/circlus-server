@@ -22,7 +22,6 @@ const params = {
   devicePublicKey: { algorithm: 'ed25519' as const, value: 'device-public-key' },
   deviceEncryptionPublicKey: { algorithm: 'x25519' as const, value: 'device-encryption-key' },
   registrationAttestation: null,
-  label: 'Phone',
   webOrigin: 'https://circle.example',
   encryptedPhysicalDeviceId: { cipher: 'aes-256-gcm', data: 'ciphertext' }
 };

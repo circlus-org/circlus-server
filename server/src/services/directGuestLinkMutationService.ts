@@ -21,8 +21,14 @@ export class DirectGuestLinkMutationError extends Error {
 export async function createDirectGuestLink(params: {
   link: DirectGuestLinkCreateInput;
   requestedChannelId: string | null;
-  newChannelTitle: string | null;
 }) {
+  if (params.link.autoSubscribeToChannel && !params.requestedChannelId) {
+    throw new DirectGuestLinkMutationError(
+      400,
+      'INVALID_REQUEST',
+      'An existing channel is required for channel subscription'
+    );
+  }
   if (params.link.publicSiteVisible && !params.link.autoSubscribeToChannel) {
     throw new DirectGuestLinkMutationError(
       400,
@@ -49,19 +55,6 @@ export async function createDirectGuestLink(params: {
           'The selected channel is not available for this guest link'
         );
       }
-    } else if (params.link.autoSubscribeToChannel) {
-      const newChannel = await announcementChannelRepository.create({
-        familyId: params.link.familyId,
-        ownerIdentityId: params.link.hostIdentityId,
-        title: params.newChannelTitle || created.presentation_title || 'Updates'
-      }, client);
-      announcementChannel = await announcementChannelRepository.attachLink({
-        familyId: params.link.familyId,
-        channelId: newChannel.channel_id,
-        linkId: created.link_id,
-        ownerIdentityId: params.link.hostIdentityId
-      }, client);
-      if (!announcementChannel) throw new Error('Failed to attach the new channel to the guest link');
     }
 
     if (announcementChannel && params.link.publicSiteVisible) {

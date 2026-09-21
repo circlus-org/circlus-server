@@ -24,8 +24,6 @@ describe('identity foreground presence persistence', () => {
     queryMock.mockResolvedValue({
       rows: [{
         identity_id: 'identity-1',
-        status_text: null,
-        status_updated_at: null,
         avatar_blob_id: null,
         presence_visible: true,
         last_seen_at: presenceAt,

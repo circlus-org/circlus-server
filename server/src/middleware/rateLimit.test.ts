@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { createRateLimiter, ipFamilyKey, ipKey } from './rateLimit';
+import { createRateLimiter, deviceFamilyKey, ipFamilyKey, ipKey } from './rateLimit';
 
 function makeReq(overrides?: Partial<Request>): Request {
   return {
@@ -33,11 +33,16 @@ function makeRes() {
 }
 
 describe('rateLimit helpers', () => {
-  test('ipKey and ipFamilyKey produce expected format', () => {
-    const req = makeReq({ ip: ' 10.0.0.5 ', familyId: ' family-1 ' } as any);
+  test('IP and authenticated-device keys produce expected format', () => {
+    const req = makeReq({
+      ip: ' 10.0.0.5 ',
+      familyId: ' family-1 ',
+      device: { deviceId: ' device-1 ' }
+    } as any);
 
     expect(ipKey(req)).toBe('ip:10.0.0.5');
     expect(ipFamilyKey(req)).toBe('ip:10.0.0.5|family:family-1');
+    expect(deviceFamilyKey(req)).toBe('device:device-1|family:family-1');
   });
 
   test('createRateLimiter blocks requests above configured max', () => {

@@ -348,6 +348,11 @@ describe('call termination WebSocket handlers', () => {
       cancellationNoDeliveryFallbackMs: 10_000
     }));
     expect(callRingingService.stop).toHaveBeenCalledWith('call-1');
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(currentWs, {
+      type: 'call:ended',
+      data: { callSessionId: 'call-1', reason: 'ended' },
+      timestamp: 1_000
+    });
     expect(dependencies.sendMessage).toHaveBeenCalledWith(peerWs, {
       type: 'call:ended',
       data: { callSessionId: 'call-1', reason: 'ended' },
@@ -425,7 +430,6 @@ describe('call termination WebSocket handlers', () => {
       expect.objectContaining({
         callSessionId: 'call-1',
         isTemporaryLinkCall: true,
-        callLinkTitle: 'Support call',
         excludeDeviceIds: ['device-callee']
       })
     );

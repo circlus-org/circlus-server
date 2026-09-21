@@ -180,8 +180,7 @@ describe('server runtime config', () => {
           checkInviteMax: 30,
           registerMax: 10,
           registerDeviceMax: 20,
-          identityEncryptedKeyMax: 30,
-          identityLookupMax: 60
+          identityEncryptedKeyMax: 30
         },
         circleMigration: {
           verify: { windowMs: 60_000, max: 10 },
@@ -201,7 +200,7 @@ describe('server runtime config', () => {
         },
         groupChats: { windowMs: 60_000, max: 240 },
         hostProvisioning: { windowMs: 60_000, max: 10 },
-        identities: { windowMs: 60_000, publishedMax: 60, avatarUploadMax: 10 },
+        identities: { windowMs: 60_000, directoryMax: 60, avatarUploadMax: 10 },
         links: { windowMs: 60_000, max: 60 },
         messages: { windowMs: 60_000, max: 240 },
         push: {

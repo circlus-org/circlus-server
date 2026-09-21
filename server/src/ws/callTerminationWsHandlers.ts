@@ -449,6 +449,15 @@ export class CallTerminationWsHandlers {
         afterSessionEnded: () => this.dependencies.callRingingService.stop(callSessionId)
       });
 
+      // Acknowledge the originating socket before the client releases its call
+      // context. Without this, a local cleanup can close the WebSocket while
+      // the termination frame is still waiting in the server's work queue.
+      this.dependencies.sendMessage(ws, {
+        type: 'call:ended',
+        data: { callSessionId, reason: context.endReason },
+        timestamp: this.now()
+      });
+
       const otherParticipant = context.otherParticipantIdentityId as IdentityId | undefined;
       if (otherParticipant) {
         await this.notifyPeer({

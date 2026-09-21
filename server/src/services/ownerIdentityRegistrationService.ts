@@ -155,24 +155,19 @@ export async function registerOwnerIdentity(params: {
       await client.query(
         `UPDATE invites
          SET used_count = used_count + 1,
-             status = CASE WHEN used_count + 1 >= max_uses THEN 'exhausted' ELSE status END,
-             accepted_by_identity_id = $1,
-             accepted_by_public_key = $2,
-             accepted_identity_name = $3,
-             accepted_at = NOW()
-         WHERE invite_id = $4 AND family_id = $5`,
-        [identityId, payload.identityPublicKey.value, null, invite.invite_id, familyId]
+             status = CASE WHEN used_count + 1 >= max_uses THEN 'exhausted' ELSE status END
+         WHERE invite_id = $1 AND family_id = $2`,
+        [invite.invite_id, familyId]
       );
       await client.query(
         `INSERT INTO invite_acceptances (
            invite_id, family_id, accepted_by_identity_id, accepted_by_public_key,
-           accepted_identity_name, accepted_at
-         ) VALUES ($1, $2, $3, $4, $5, NOW())
+           accepted_at
+         ) VALUES ($1, $2, $3, $4, NOW())
          ON CONFLICT (invite_id, accepted_by_identity_id) DO UPDATE
          SET accepted_by_public_key = EXCLUDED.accepted_by_public_key,
-             accepted_identity_name = EXCLUDED.accepted_identity_name,
              accepted_at = EXCLUDED.accepted_at`,
-        [invite.invite_id, familyId, identityId, payload.identityPublicKey.value, null]
+        [invite.invite_id, familyId, identityId, payload.identityPublicKey.value]
       );
       await client.query(
         `UPDATE tenant_owner_claims

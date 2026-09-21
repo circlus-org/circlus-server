@@ -35,7 +35,6 @@ type InviteAcceptanceRow = {
   invite_id: string;
   accepted_by_identity_id: string;
   accepted_by_public_key: string | null;
-  accepted_identity_name: string | null;
   accepted_at: Date;
   admission_claim: unknown | null;
 };
@@ -52,14 +51,9 @@ function isEncryptedBlob(value: unknown): boolean {
 function serializeInvite(invite: FindByTokenResult, acceptances: InviteAcceptanceRow[] = []) {
   return {
     inviteId: invite.invite_id,
-    title: null,
     token: invite.token,
     createdBy: invite.created_by,
     createdAt: invite.created_at.toISOString(),
-    acceptedByIdentityId: invite.accepted_by_identity_id,
-    acceptedIdentityName: null,
-    acceptedIdentityPublicKey: invite.accepted_by_public_key ?? null,
-    acceptedAt: invite.accepted_at ? invite.accepted_at.toISOString() : null,
     expiresAt: invite.expires_at.toISOString(),
     maxUses: invite.max_uses,
     usedCount: invite.used_count,
@@ -88,7 +82,6 @@ async function findInviteAcceptances(familyId: string, inviteIds: string[]): Pro
     `SELECT invite_id,
             accepted_by_identity_id,
             accepted_by_public_key,
-            accepted_identity_name,
             accepted_at,
             admission_claim
      FROM invite_acceptances
@@ -369,25 +362,22 @@ router.post('/audit', verifySignature, requireActiveIdentity, requireAdmin, asyn
     }
     const result = await query<{
       invite_id: string;
-      title: string | null;
       capability_id: string;
       capability_descriptor: LinkCapabilityDescriptor;
       issuer_identity_id: string;
       issuer_public_key_algorithm: 'ed25519';
       issuer_public_key_value: string;
       accepted_identity_id: string;
-      accepted_identity_name: string | null;
       accepted_public_key_algorithm: 'ed25519';
       accepted_public_key_value: string;
       admission_claim: unknown;
       accepted_at: Date;
     }>(
-      `SELECT invite.invite_id, invite.title, invite.capability_id, invite.capability_descriptor,
+      `SELECT invite.invite_id, invite.capability_id, invite.capability_descriptor,
               issuer.identity_id AS issuer_identity_id,
               issuer.public_key_algorithm AS issuer_public_key_algorithm,
               issuer.public_key_value AS issuer_public_key_value,
               acceptance.accepted_by_identity_id AS accepted_identity_id,
-              acceptance.accepted_identity_name,
               accepted.public_key_algorithm AS accepted_public_key_algorithm,
               accepted.public_key_value AS accepted_public_key_value,
               acceptance.admission_claim,
@@ -411,7 +401,6 @@ router.post('/audit', verifySignature, requireActiveIdentity, requireAdmin, asyn
       status: 'ok',
       result: result.rows.map((row) => ({
         inviteId: row.invite_id,
-        title: null,
         capabilityId: row.capability_id,
         descriptor: row.capability_descriptor,
         issuerIdentityId: row.issuer_identity_id,

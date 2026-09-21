@@ -19,6 +19,16 @@ export function validateQuickReceiveGrant(params: {
 }): boolean {
   const { grant } = params;
   const payload = grant?.payload;
+  const allowedPayloadFields = new Set([
+    'version',
+    'purpose',
+    'grantId',
+    'receiverIdentityId',
+    'targetDeviceId',
+    'authorizedSenderIdentityId',
+    'issuedAt',
+    'maxFileSizeBytes'
+  ]);
   if (
     !grant
     || !payload
@@ -36,7 +46,7 @@ export function validateQuickReceiveGrant(params: {
     || payload.targetDeviceId !== params.targetDeviceId
     || payload.authorizedSenderIdentityId !== params.senderIdentityId
     || (!!payload.maxFileSizeBytes && params.fileSize > payload.maxFileSizeBytes)
+    || Object.keys(payload).some((field) => !allowedPayloadFields.has(field))
   ) return false;
   return (params.verify || verifySignedRequest)(grant, params.targetIdentity.publicKey);
 }
-

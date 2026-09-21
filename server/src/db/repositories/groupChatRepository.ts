@@ -18,25 +18,19 @@ import type {
   ListGroupChatMessagesResult,
 } from './groupChatRepository.queries';
 import {
-  createGroupChat,
   insertGroupChatParticipant,
   ensureGroupChatReadState,
   findGroupChat,
   findGroupChatParticipant,
   listActiveGroupChatParticipants,
   setGroupChatParticipantMuted,
-  renameGroupChat,
   reactivateGroupChatParticipant,
   removeGroupChatParticipant,
-  setGroupChatOwner,
-  bumpGroupChatKeyEpoch,
-  findNextGroupChatOwner,
   updateGroupChatPreview,
   upsertGroupChatRead,
   upsertGroupChatKeyEnvelope,
   findGroupChatKeyEnvelopeForIdentity,
   findGroupChatEpochKeyCommitment,
-  claimGroupChatEpochKey,
   findGroupChatEpochKey,
 } from './groupChatRepository.queries';
 
@@ -265,46 +259,6 @@ function mapGroupChatEpochKey(row: FindGroupChatEpochKeyResult): GroupChatEpochK
 }
 
 export class GroupChatRepository {
-  async createChat(params: {
-    chatId: string;
-    familyId: string;
-    titleCiphertext: string;
-    ownerIdentityId: IdentityId;
-    participantIds: IdentityId[];
-    createdAt: number;
-  }): Promise<void> {
-    await transaction(async (client) => {
-      await createGroupChat.run({
-        chatId: params.chatId,
-        familyId: params.familyId,
-        titleCiphertext: params.titleCiphertext,
-        ownerIdentityId: params.ownerIdentityId,
-        createdAt: params.createdAt,
-        updatedAt: params.createdAt,
-      }, client);
-
-      const ordered = Array.from(new Set([params.ownerIdentityId, ...params.participantIds]));
-      for (let i = 0; i < ordered.length; i += 1) {
-        const identityId = ordered[i];
-        await insertGroupChatParticipant.run({
-          chatId: params.chatId,
-          familyId: params.familyId,
-          identityId,
-          addedByIdentityId: params.ownerIdentityId,
-          joinedAt: params.createdAt,
-          joinOrder: i + 1
-        }, client);
-
-        await ensureGroupChatReadState.run({
-          chatId: params.chatId,
-          familyId: params.familyId,
-          identityId,
-          lastReadAt: 0,
-        }, client);
-      }
-    });
-  }
-
   async createV2Chat(params: {
     chatId: string;
     familyId: string;
@@ -449,112 +403,6 @@ export class GroupChatRepository {
     muted: boolean
   ): Promise<void> {
     await setGroupChatParticipantMuted.run({ familyId, chatId, identityId, muted }, pool);
-  }
-
-  async renameChat(
-    familyId: string,
-    chatId: string,
-    titleCiphertext: string,
-    updatedAt: number,
-    client?: PoolClient
-  ): Promise<void> {
-    await renameGroupChat.run({ familyId, chatId, titleCiphertext, updatedAt }, client || pool);
-  }
-
-  async addParticipants(
-    familyId: string,
-    chatId: string,
-    addedByIdentityId: IdentityId,
-    participantIds: IdentityId[],
-    joinedAt: number,
-    client?: PoolClient
-  ): Promise<IdentityId[]> {
-    const db = client || pool;
-    const current = await this.listActiveParticipants(familyId, chatId, client);
-    let nextOrder = current.length + 1;
-    const added: IdentityId[] = [];
-
-    for (const identityId of participantIds) {
-      const existing = await this.findParticipant(familyId, chatId, identityId, client);
-      if (existing?.is_active) continue;
-
-      if (!existing) {
-        await insertGroupChatParticipant.run({
-          chatId,
-          familyId,
-          identityId,
-          addedByIdentityId,
-          joinedAt,
-          joinOrder: nextOrder
-        }, db);
-      } else {
-        await reactivateGroupChatParticipant.run({
-          joinedAt,
-          addedByIdentityId,
-          joinOrder: nextOrder,
-          familyId,
-          chatId,
-          identityId,
-        }, db);
-      }
-
-      await ensureGroupChatReadState.run({ chatId, familyId, identityId, lastReadAt: 0 }, db);
-
-      added.push(identityId);
-      nextOrder += 1;
-    }
-
-    return added;
-  }
-
-  async removeParticipant(
-    familyId: string,
-    chatId: string,
-    identityId: IdentityId,
-    leftAt: number,
-    client?: PoolClient
-  ): Promise<void> {
-    await removeGroupChatParticipant.run({ leftAt, familyId, chatId, identityId }, client || pool);
-  }
-
-  async setOwner(
-    familyId: string,
-    chatId: string,
-    ownerIdentityId: IdentityId,
-    updatedAt: number,
-    client?: PoolClient
-  ): Promise<void> {
-    await setGroupChatOwner.run({ ownerIdentityId, updatedAt, familyId, chatId }, client || pool);
-  }
-
-
-
-  async bumpKeyEpoch(familyId: string, chatId: string, client?: PoolClient): Promise<number> {
-    const results = await bumpGroupChatKeyEpoch.run({ updatedAt: Date.now(), familyId, chatId }, client || pool);
-    return results[0]?.key_epoch || 1;
-  }
-
-  async bumpKeyEpochIfStale(familyId: string, chatId: string, maxAgeMs: number): Promise<{ bumped: boolean; keyEpoch: number }> {
-    const now = Date.now();
-    const result = await pool.query<{ key_epoch: number }>(
-      `UPDATE group_chats
-       SET key_epoch = key_epoch + 1,
-           key_epoch_updated_at = $4,
-           updated_at = $4
-       WHERE family_id = $1
-         AND chat_id = $2
-         AND COALESCE(key_epoch_updated_at, updated_at, created_at, 0) <= $3
-       RETURNING key_epoch`,
-      [familyId, chatId, now - maxAgeMs, now]
-    );
-    if (result.rows[0]) return { bumped: true, keyEpoch: Number(result.rows[0].key_epoch) };
-    const chat = await this.findChat(familyId, chatId);
-    return { bumped: false, keyEpoch: chat?.key_epoch || 1 };
-  }
-
-  async findNextOwner(familyId: string, chatId: string, client?: PoolClient): Promise<IdentityId | null> {
-    const results = await findNextGroupChatOwner.run({ familyId, chatId }, client || pool);
-    return (results[0]?.identity_id as IdentityId | undefined) || null;
   }
 
   async findByClientMessageId(
@@ -949,41 +797,6 @@ export class GroupChatRepository {
       public_key_algorithm: row.public_key_algorithm as 'ed25519' | 'x25519',
       public_key_value: row.public_key_value,
     }));
-  }
-
-  async claimEpochKey(params: {
-    familyId: string;
-    chatId: string;
-    epoch: number;
-    keyCommitment: string;
-    proposerIdentityId: IdentityId;
-    proposerDeviceId: DeviceId;
-    signedEpochTransition: GroupEpochTransitionClaim;
-    createdAt: number;
-  }, client?: PoolClient): Promise<{ won: boolean; existing: GroupChatEpochKeyRecord | null }> {
-    const db = client || pool;
-    const inserted = await claimGroupChatEpochKey.run({
-      chatId: params.chatId,
-      familyId: params.familyId,
-      epoch: params.epoch,
-      keyCommitment: params.keyCommitment,
-      proposerIdentityId: params.proposerIdentityId,
-      proposerDeviceId: params.proposerDeviceId,
-      signedEpochTransition: params.signedEpochTransition as any,
-      createdAt: params.createdAt,
-    }, db);
-
-    if (inserted[0]) {
-      return { won: true, existing: mapGroupChatEpochKey(inserted[0]) };
-    }
-
-    const existingResult = await findGroupChatEpochKey.run({
-      chatId: params.chatId,
-      familyId: params.familyId,
-      epoch: params.epoch,
-    }, db);
-
-    return { won: false, existing: existingResult[0] ? mapGroupChatEpochKey(existingResult[0]) : null };
   }
 
   async listStateTransitions(familyId: string, chatId: string): Promise<GroupChatStateTransitionRecord[]> {

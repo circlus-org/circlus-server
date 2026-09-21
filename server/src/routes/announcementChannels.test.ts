@@ -50,8 +50,7 @@ jest.mock('../utils/push', () => ({
 jest.mock('../db/repositories', () => ({
   announcementChannelRepository: {
     create: jest.fn(),
-    updateDetails: jest.fn(),
-    updateAudience: jest.fn(),
+    updateMetadata: jest.fn(),
     updateServerAdminDisclosure: jest.fn(),
     updatePublicSite: jest.fn(),
     listVisibleForIdentity: jest.fn(),
@@ -206,22 +205,25 @@ describe('announcement channel identity subscriptions', () => {
     expect(response.result[0]).not.toHaveProperty('updatedAt');
   });
 
-  test('updates channel details for the channel author', async () => {
+  test('updates only encrypted channel metadata for the channel author', async () => {
     const channel = {
       channel_id: 'ach_1',
       family_id: 'family_1',
       owner_identity_id: 'owner_1',
-      title: 'Old title',
+      title: null,
       description: null,
       status: 'active',
       public_site_visible: false,
+      key_epoch: 2,
+      metadata_revision: 3,
     };
     const updated = {
       ...channel,
-      title: 'New title',
-      description: 'Channel description',
-      visibility: 'circle',
-      content_mode: 'private_e2ee',
+      metadata_epoch: 2,
+      metadata_ciphertext: 'gcm1:ciphertext',
+      metadata_revision: 4,
+      metadata_author_device_id: 'device_1',
+      metadata_author_claim: {},
       is_default: false,
       subscription_id: null,
       subscription_status: null,
@@ -233,7 +235,7 @@ describe('announcement channel identity subscriptions', () => {
       updated_at: new Date('2026-01-02T00:00:00Z'),
     };
     repositories.announcementChannelRepository.findById.mockResolvedValue(channel);
-    repositories.announcementChannelRepository.updateDetails.mockResolvedValue(updated);
+    repositories.announcementChannelRepository.updateMetadata.mockResolvedValue(updated);
     repositories.announcementChannelRepository.listVisibleForIdentity.mockResolvedValue([updated]);
     const res = makeResponse();
 
@@ -241,28 +243,67 @@ describe('announcement channel identity subscriptions', () => {
       familyId: 'family_1',
       params: { channelId: 'ach_1' },
       identity: { identityId: 'owner_1', role: 'member' },
+      device: { deviceId: 'device_1', publicKey: { algorithm: 'ed25519', value: 'device-key' } },
       signedRequest: {
         payload: {
-          title: '  New title  ',
-          description: ' Channel description ',
+          epoch: 2,
+          expectedRevision: 3,
+          ciphertext: 'gcm1:ciphertext',
+          authorClaim: {
+            type: 'channel:metadata:update',
+            signerId: 'device_1',
+            payload: { version: 1, channelId: 'ach_1', epoch: 2, expectedRevision: 3, ciphertext: 'gcm1:ciphertext' },
+          },
         },
       },
     }, res);
 
-    expect(repositories.announcementChannelRepository.updateDetails).toHaveBeenCalledWith({
+    expect(repositories.announcementChannelRepository.updateMetadata).toHaveBeenCalledWith({
       familyId: 'family_1',
       channelId: 'ach_1',
       ownerIdentityId: 'owner_1',
-      title: 'New title',
-      description: 'Channel description',
+      epoch: 2,
+      expectedRevision: 3,
+      ciphertext: 'gcm1:ciphertext',
+      authorDeviceId: 'device_1',
+      authorClaim: expect.objectContaining({ type: 'channel:metadata:update' }),
     });
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       result: expect.objectContaining({
         channelId: 'ach_1',
-        title: 'New title',
-        description: 'Channel description',
+        title: '',
+        description: null,
+        metadata: expect.objectContaining({ epoch: 2, revision: 4, ciphertext: 'gcm1:ciphertext' }),
       }),
     }));
+  });
+
+  test('rejects channel metadata when its inner device signature is invalid', async () => {
+    const cryptoUtils = require('../utils/crypto');
+    cryptoUtils.verifySignedRequest.mockReturnValueOnce(false);
+    const res = makeResponse();
+
+    await getPostHandler('/:channelId/update')({
+      familyId: 'family_1',
+      params: { channelId: 'ach_1' },
+      identity: { identityId: 'owner_1', role: 'member' },
+      device: { deviceId: 'device_1', publicKey: { algorithm: 'ed25519', value: 'device-key' } },
+      signedRequest: {
+        payload: {
+          epoch: 2,
+          expectedRevision: 3,
+          ciphertext: 'gcm1:ciphertext',
+          authorClaim: {
+            type: 'channel:metadata:update',
+            signerId: 'device_1',
+            payload: { version: 1, channelId: 'ach_1', epoch: 2, expectedRevision: 3, ciphertext: 'gcm1:ciphertext' },
+          },
+        },
+      },
+    }, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(repositories.announcementChannelRepository.updateMetadata).not.toHaveBeenCalled();
   });
 
   test('lets an eligible channel author disclose confirmed server administration', async () => {
@@ -415,7 +456,6 @@ describe('announcement channel identity subscriptions', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       result: [expect.objectContaining({
         channelId: 'ach_1',
-        visibility: 'circle',
         isDefault: true,
         status: 'active',
         linkCount: 2,
@@ -664,11 +704,11 @@ describe('announcement channel identity subscriptions', () => {
     await getPostHandler('/create')({
       familyId: 'family_1',
       identity: { identityId: 'member_1', role: 'member' },
-      signedRequest: { payload: { title: 'Member updates' } },
+      signedRequest: { payload: {} },
     }, res);
 
     expect(repositories.announcementChannelRepository.create).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerIdentityId: 'member_1', title: 'Member updates' })
+      expect.objectContaining({ ownerIdentityId: 'member_1' })
     );
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       result: expect.objectContaining({ channelId: 'ach_new' }),
@@ -757,7 +797,7 @@ describe('announcement channel identity subscriptions', () => {
       'owner_1',
       expect.objectContaining({
         channelId: 'ach_1',
-        channelTitle: 'Member updates',
+        channelTitle: 'Channel',
         requestingIdentityId: 'member_1',
         requestingIdentityName: undefined,
       })

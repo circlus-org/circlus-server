@@ -253,21 +253,12 @@ export class DirectFileTransferSignalingService {
     const fromIdentity = await (
       this.dependencies.findIdentity || identityRepository.findByIdentityId.bind(identityRepository)
     )(info.familyId, info.identityId);
-    const fromDevice = info.identityId === targetIdentityId
-      ? await (this.dependencies.findDevice || deviceRepository.findByDeviceId.bind(deviceRepository))(
-          info.familyId,
-          info.deviceId
-        )
-      : null;
     const fromIdentityName = await this.dependencies.resolvePublishedIdentityName(info.familyId, fromIdentity);
     const incomingData: WSDirectFileTransferIncomingData = {
       sessionId,
       fromIdentityId: info.identityId,
       fromIdentityName,
-      ...(fromDevice ? {
-        fromDeviceId: info.deviceId,
-        ...(fromDevice.label ? { fromDeviceLabel: fromDevice.label } : {})
-      } : {}),
+      ...(info.identityId === targetIdentityId ? { fromDeviceId: info.deviceId } : {}),
       metadata,
       offer
     };

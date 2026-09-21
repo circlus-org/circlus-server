@@ -1,20 +1,37 @@
 import { routeLogger } from '../utils/routeLogger';
 import { Router } from 'express';
 import { identityRepository } from '../db/repositories';
+import { query, transaction } from '../db';
 import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
-import type { ApiResponse, ErrorCode, IdentityId } from '../../../shared/types';
+import type { ApiResponse, CircleEncryptedIdentityStatus, ErrorCode, IdentityId } from '../../../shared/types';
 
 const router = Router();
 
-const MAX_STATUS_LENGTH = 280; // Like Twitter
+type EncryptedStatusRow = {
+  owner_identity_id: string;
+  epoch: number;
+  revision: number;
+  ciphertext: string;
+  updated_at: Date;
+};
+
+function mapEncryptedStatus(row: EncryptedStatusRow): CircleEncryptedIdentityStatus {
+  return {
+    ownerIdentityId: row.owner_identity_id,
+    epoch: Number(row.epoch),
+    revision: Number(row.revision),
+    ciphertext: row.ciphertext,
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
 
 /**
  * Set user status for current identity
  */
-router.post('/set', verifySignature, requireActiveIdentity, requireFullCircleIdentity, async (req: AuthRequest<{ statusText?: string | null }>, res) => {
+router.post('/set', verifySignature, requireActiveIdentity, requireFullCircleIdentity, async (req: AuthRequest<{ encryptedStatus?: Partial<CircleEncryptedIdentityStatus> }>, res) => {
   try {
-    const { statusText } = getSignedPayload<{ statusText?: string | null }>(req);
+    const { encryptedStatus } = getSignedPayload<{ encryptedStatus?: Partial<CircleEncryptedIdentityStatus> }>(req);
     const identityId = req.device!.identityId;
     const familyId = req.familyId;
 
@@ -28,41 +45,48 @@ router.post('/set', verifySignature, requireActiveIdentity, requireFullCircleIde
       } as ApiResponse);
     }
 
-    // Validate status text
-    if (statusText !== null && statusText !== undefined) {
-      if (typeof statusText !== 'string') {
-        return res.status(400).json({
-          status: 'error',
-          error: {
-            code: 'INVALID_STATE' as ErrorCode,
-            message: 'Status must be a string'
-          }
-        } as ApiResponse);
-      }
-
-      if (statusText.length > MAX_STATUS_LENGTH) {
-        return res.status(400).json({
-          status: 'error',
-          error: {
-            code: 'INVALID_STATE' as ErrorCode,
-            message: `Status text too long (max ${MAX_STATUS_LENGTH} characters)`
-          }
-        } as ApiResponse);
-      }
+    const ownerIdentityId = typeof encryptedStatus?.ownerIdentityId === 'string' ? encryptedStatus.ownerIdentityId.trim() : '';
+    const epoch = Number(encryptedStatus?.epoch);
+    const revision = Number(encryptedStatus?.revision);
+    const ciphertext = typeof encryptedStatus?.ciphertext === 'string' ? encryptedStatus.ciphertext.trim() : '';
+    if (ownerIdentityId !== identityId || !Number.isSafeInteger(epoch) || epoch < 1
+      || !Number.isSafeInteger(revision) || revision < 1 || !ciphertext || ciphertext.length > 16384) {
+      return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Invalid encrypted status' } } as ApiResponse);
     }
 
-    // Update status
-    await identityRepository.updateStatusText(
-      familyId,
-      identityId,
-      statusText === '' ? null : (statusText ?? null)
-    );
+    const stored = await transaction(async (client) => {
+      const latestEpoch = await client.query<{ epoch: number }>(
+        `SELECT epoch FROM circle_profile_epochs WHERE family_id = $1 ORDER BY epoch DESC LIMIT 1 FOR UPDATE`,
+        [familyId]
+      );
+      if (Number(latestEpoch.rows[0]?.epoch) !== epoch) return null;
+      const current = await client.query<EncryptedStatusRow>(
+        `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
+           FROM circle_encrypted_identity_statuses
+          WHERE family_id = $1 AND owner_identity_id = $2 FOR UPDATE`,
+        [familyId, identityId]
+      );
+      if (current.rows[0] && revision <= Number(current.rows[0].revision)) return mapEncryptedStatus(current.rows[0]);
+      const saved = await client.query<EncryptedStatusRow>(
+        `INSERT INTO circle_encrypted_identity_statuses
+           (family_id, owner_identity_id, epoch, revision, ciphertext)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (family_id, owner_identity_id) DO UPDATE SET
+           epoch = EXCLUDED.epoch, revision = EXCLUDED.revision,
+           ciphertext = EXCLUDED.ciphertext, updated_at = NOW()
+         RETURNING owner_identity_id, epoch, revision, ciphertext, updated_at`,
+        [familyId, identityId, epoch, revision, ciphertext]
+      );
+      return mapEncryptedStatus(saved.rows[0]!);
+    });
+    if (!stored) {
+      return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE' as ErrorCode, message: 'Circle profile epoch changed' } } as ApiResponse);
+    }
 
     return res.json({
       status: 'ok',
       result: {
-        statusText: statusText === '' ? null : statusText,
-        statusUpdatedAt: new Date().toISOString()
+        encryptedStatus: stored
       }
     } as ApiResponse);
   } catch (error) {
@@ -118,12 +142,21 @@ router.post('/get', verifySignature, requireActiveIdentity, requireFullCircleIde
     }
 
     // Get statuses
-    const statusMap = await identityRepository.getStatuses(familyId, identityIds as IdentityId[]);
+    const normalizedIdentityIds = identityIds.map(String) as IdentityId[];
+    const [statusMap, encryptedRows] = await Promise.all([
+      identityRepository.getStatuses(familyId, normalizedIdentityIds),
+      query<EncryptedStatusRow>(
+        `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
+           FROM circle_encrypted_identity_statuses
+          WHERE family_id = $1 AND owner_identity_id = ANY($2::text[])`,
+        [familyId, normalizedIdentityIds]
+      ),
+    ]);
+    const encryptedByIdentity = new Map(encryptedRows.rows.map((row) => [row.owner_identity_id, mapEncryptedStatus(row)]));
 
     // Convert Map to object for JSON response
     const statuses: Record<string, {
-      statusText: string | null;
-      statusUpdatedAt: string | null;
+      encryptedStatus: CircleEncryptedIdentityStatus | null;
       avatarBlobId: string | null;
       presence: {
         visibility: 'visible' | 'hidden';
@@ -134,8 +167,7 @@ router.post('/get', verifySignature, requireActiveIdentity, requireFullCircleIde
     }> = {};
     for (const [identityId, statusData] of statusMap.entries()) {
       statuses[identityId] = {
-        statusText: statusData.statusText,
-        statusUpdatedAt: statusData.statusUpdatedAt ? statusData.statusUpdatedAt.toISOString() : null,
+        encryptedStatus: encryptedByIdentity.get(identityId) || null,
         avatarBlobId: statusData.avatarBlobId,
         presence: {
           visibility: statusData.presenceVisible ? 'visible' : 'hidden',
@@ -180,9 +212,13 @@ router.post('/my', verifySignature, requireActiveIdentity, requireFullCircleIden
       } as ApiResponse);
     }
 
-    const identity = await identityRepository.findByIdentityId(familyId, identityId);
-
-    if (!identity) {
+    const result = await query<EncryptedStatusRow>(
+      `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
+         FROM circle_encrypted_identity_statuses
+        WHERE family_id = $1 AND owner_identity_id = $2`,
+      [familyId, identityId]
+    );
+    if (!req.identity) {
       return res.status(404).json({
         status: 'error',
         error: {
@@ -195,9 +231,7 @@ router.post('/my', verifySignature, requireActiveIdentity, requireFullCircleIden
     return res.json({
       status: 'ok',
       result: {
-        statusText: identity.status_text,
-        statusUpdatedAt: identity.status_updated_at ? identity.status_updated_at.toISOString() : null,
-        avatarBlobId: (identity as any).avatar_blob_id ?? null
+        encryptedStatus: result.rows[0] ? mapEncryptedStatus(result.rows[0]) : null
       }
     } as ApiResponse);
   } catch (error) {

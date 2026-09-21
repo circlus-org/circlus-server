@@ -1,4 +1,4 @@
-import type { CircleIdentityAdmissionProof, CircleOwnerRecoveryAcceptance, PublicKey } from '@shared/types';
+import type { CircleIdentityAdmissionProof, PublicKey } from '@shared/types';
 import type {
   CircleInviteAcceptance,
   DirectGuestAcceptance,
@@ -27,10 +27,6 @@ type AdmissionRow = {
   guest_issuer_key_algorithm: 'ed25519' | 'x25519' | null;
   guest_issuer_key_value: string | null;
   guest_admission_claim: unknown;
-  recovery_previous_owner_identity_id: string | null;
-  recovery_previous_owner_key_algorithm: 'ed25519' | 'x25519' | null;
-  recovery_previous_owner_key_value: string | null;
-  recovery_signed_authorization: { newIdentityAcceptance?: unknown } | null;
 };
 
 function publicKey(algorithm: string | null, value: string | null): PublicKey | null {
@@ -67,11 +63,7 @@ export async function listCircleIdentityAdmissionProofs(
             guest_link.host_identity_id AS guest_issuer_identity_id,
             guest_issuer.public_key_algorithm AS guest_issuer_key_algorithm,
             guest_issuer.public_key_value AS guest_issuer_key_value,
-            guest_registration.admission_claim AS guest_admission_claim,
-            recovery.previous_owner_identity_id AS recovery_previous_owner_identity_id,
-            recovery_previous_owner.public_key_algorithm AS recovery_previous_owner_key_algorithm,
-            recovery_previous_owner.public_key_value AS recovery_previous_owner_key_value,
-            recovery.signed_authorization AS recovery_signed_authorization
+            guest_registration.admission_claim AS guest_admission_claim
        FROM identities identity
        LEFT JOIN invites invite
          ON invite.family_id = identity.family_id
@@ -99,18 +91,6 @@ export async function listCircleIdentityAdmissionProofs(
        LEFT JOIN identities guest_issuer
          ON guest_issuer.family_id = guest_link.family_id
         AND guest_issuer.identity_id = guest_link.host_identity_id
-       LEFT JOIN LATERAL (
-         SELECT owner_change.previous_owner_identity_id, owner_change.signed_authorization
-           FROM circle_owner_changes owner_change
-          WHERE owner_change.family_id = identity.family_id
-            AND owner_change.new_owner_identity_id = identity.identity_id
-            AND owner_change.method = 'server_admin_recovery'
-          ORDER BY owner_change.created_at DESC
-          LIMIT 1
-       ) recovery ON TRUE
-       LEFT JOIN identities recovery_previous_owner
-         ON recovery_previous_owner.family_id = identity.family_id
-        AND recovery_previous_owner.identity_id = recovery.previous_owner_identity_id
       WHERE identity.family_id = $1
       ORDER BY identity.created_at ASC, identity.identity_id ASC`,
     [familyId]
@@ -128,10 +108,6 @@ export async function listCircleIdentityAdmissionProofs(
     const identityPublicKey = publicKey(row.public_key_algorithm, row.public_key_value)!;
     const inviteIssuerPublicKey = publicKey(row.invite_issuer_key_algorithm, row.invite_issuer_key_value);
     const guestIssuerPublicKey = publicKey(row.guest_issuer_key_algorithm, row.guest_issuer_key_value);
-    const recoveryPreviousOwnerPublicKey = publicKey(
-      row.recovery_previous_owner_key_algorithm,
-      row.recovery_previous_owner_key_value
-    );
     let admission: CircleIdentityAdmissionProof['admission'] = null;
     if (
       row.admission_capability_id
@@ -171,17 +147,6 @@ export async function listCircleIdentityAdmissionProofs(
           capabilityProof: LinkCapabilityProof;
           subjectAcceptance: DirectGuestAcceptance;
         },
-      };
-    } else if (
-      row.recovery_previous_owner_identity_id
-      && recoveryPreviousOwnerPublicKey
-      && row.recovery_signed_authorization?.newIdentityAcceptance
-    ) {
-      admission = {
-        kind: 'owner_recovery',
-        previousOwnerIdentityId: row.recovery_previous_owner_identity_id,
-        previousOwnerPublicKey: recoveryPreviousOwnerPublicKey,
-        acceptance: row.recovery_signed_authorization.newIdentityAcceptance as CircleOwnerRecoveryAcceptance,
       };
     }
     return {

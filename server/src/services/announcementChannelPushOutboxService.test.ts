@@ -57,7 +57,7 @@ describe('announcement channel push outbox', () => {
       'subscriber_1',
       'acp_1',
       'owner_1',
-      'Updates',
+      'Channel',
       expect.objectContaining({
         channelId: 'ach_1',
         dialogId: 'ach_1',

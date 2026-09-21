@@ -273,17 +273,13 @@ router.post('/reservations', verifySignature, requireActiveIdentity, reliableOpe
     if (!familyId || !identityId) return res.status(500).json(err('INTERNAL_ERROR', 'Family context is missing'));
 
     const payload = getSignedPayload<{
-      filename?: string;
-      mimeType?: string | null;
       plaintextSizeBytes?: number;
     }>(req);
 
-    const filename = String(payload.filename || '').trim();
-    const mimeType = payload.mimeType ? String(payload.mimeType) : null;
     const plaintextSizeBytes = Number(payload.plaintextSizeBytes || 0);
 
-    if (!filename || !Number.isFinite(plaintextSizeBytes) || plaintextSizeBytes <= 0) {
-      return res.status(400).json(err('INVALID_REQUEST', 'filename and plaintextSizeBytes are required'));
+    if (!Number.isFinite(plaintextSizeBytes) || plaintextSizeBytes <= 0) {
+      return res.status(400).json(err('INVALID_REQUEST', 'plaintextSizeBytes is required'));
     }
 
     const policy = await getAttachmentPolicy(familyId);
@@ -327,8 +323,6 @@ router.post('/reservations', verifySignature, requireActiveIdentity, reliableOpe
       blobId,
       familyId,
       uploaderIdentityId: identityId,
-      originalFileName: filename,
-      mimeType,
       plaintextSizeBytes,
       storageKey,
       expiresAt,
@@ -416,14 +410,14 @@ router.put('/uploads/:blobId', async (req, res) => {
       reservationId: reservation.reservation_id,
       blobId,
       ciphertextSizeBytes: upload.bytesWritten,
-      plaintextSha256: upload.sha256
+      ciphertextSha256: upload.sha256
     });
 
     return res.json(ok({
       blobId,
       uploaded: true,
       ciphertextSizeBytes: upload.bytesWritten,
-      plaintextSha256: upload.sha256
+      ciphertextSha256: upload.sha256
     }));
   } catch (error) {
     if (error instanceof UploadStreamError) {

@@ -33,7 +33,7 @@ export async function endDirectGuestAccessByLink(params: {
       [params.familyId, params.linkId, params.hostIdentityId]
     );
 
-    const removedChannels = new Map<string, { channelId: string; title: string; keyEpoch: number }>();
+    const removedChannels = new Map<string, { channelId: string; keyEpoch: number }>();
     for (const registration of registrations.rows) {
       const impacts = await announcementChannelRepository.listOwnedActiveSubscriptionsForGuest({
         familyId: params.familyId,
@@ -50,7 +50,6 @@ export async function endDirectGuestAccessByLink(params: {
         if (removed) {
           removedChannels.set(impact.channel_id, {
             channelId: impact.channel_id,
-            title: impact.title,
             keyEpoch: Number(impact.key_epoch || 1)
           });
         }
