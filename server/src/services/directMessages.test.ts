@@ -7,7 +7,9 @@ jest.mock('../db/repositories', () => ({
     insertMessage: jest.fn(),
     bumpDirectEpochIfStale: jest.fn(),
     getDirectCurrentEpoch: jest.fn(),
-    findDirectEpochKey: jest.fn()
+    findDirectEpochKey: jest.fn(),
+    getSyncState: jest.fn(),
+    fetchStatusUpdatesForSync: jest.fn()
   },
   directGuestRegistrationRepository: { touchLastSeen: jest.fn() },
 }));
@@ -41,7 +43,7 @@ import { identityRepository, messageRepository } from '../db/repositories';
 import { sendIncomingMessagePush } from '../utils/push';
 import { sendDirectChatWsEvent } from '../ws/wsGateway';
 import { resolveDirectCommunicationAccess } from './directGuestAccessService';
-import { editDirectMessage, sendDirectMessage } from './directMessages';
+import { editDirectMessage, fetchDirectMessageStatusSync, sendDirectMessage } from './directMessages';
 import { configService } from './configService';
 
 describe('direct message idempotency', () => {
@@ -117,6 +119,35 @@ describe('direct message idempotency', () => {
 
     expect(messageRepository.findByClientMessageId).not.toHaveBeenCalled();
     expect(messageRepository.insertMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('focused direct-message status sync', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (messageRepository.getSyncState as jest.Mock).mockResolvedValue({
+      last_sync_at: 900,
+      last_status_sync_at: 800,
+      last_mutation_sync_at: 700
+    });
+    (messageRepository.fetchStatusUpdatesForSync as jest.Mock).mockResolvedValue([]);
+  });
+
+  it('replays the whole peer status history instead of using the global device cursor', async () => {
+    await fetchDirectMessageStatusSync({
+      familyId: 'circle-1',
+      identityId: 'identity-1',
+      deviceId: 'device-2',
+      peerIdentityId: 'identity-2'
+    });
+
+    expect(messageRepository.fetchStatusUpdatesForSync).toHaveBeenCalledWith(
+      'circle-1',
+      'identity-1',
+      0,
+      101,
+      'identity-2'
+    );
   });
 });
 

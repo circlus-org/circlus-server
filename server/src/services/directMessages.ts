@@ -805,7 +805,9 @@ export async function fetchDirectMessageStatusSync(params: {
   const syncState = await messageRepository.getSyncState(params.familyId, params.deviceId as any);
   const since = typeof params.since === 'number' && Number.isFinite(params.since)
     ? params.since
-    : syncState.last_status_sync_at;
+    // Focused sync is also a repair path for devices that acknowledged a
+    // receipt before the corresponding history page was stored locally.
+    : (params.peerIdentityId ? 0 : syncState.last_status_sync_at);
   const limit = Math.max(1, Math.min(500, params.limit || 100));
   const candidates = await messageRepository.fetchStatusUpdatesForSync(
     params.familyId,

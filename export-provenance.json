@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "mode": "preview",
-  "sourceCommit": "fad95f1438d0874c7649562197597288096dc96f",
-  "sourceDirty": true
+  "mode": "release",
+  "sourceCommit": "8e6a9fe2c50a19125cc8490a1f5df8dbee3f8281",
+  "sourceDirty": false
 }
