@@ -436,7 +436,9 @@ until these process-local components have a shared coordination layer.
 
 ## Updating
 
-Before updating a production server, make a database backup.
+Before updating a production server, create and verify a
+[database backup](#database-backup-before-an-update). Do not continue with the
+update if the backup command or its validation fails.
 
 For Docker Compose deployments:
 
@@ -492,12 +494,28 @@ At minimum, back up:
 - reverse proxy configuration;
 - any custom filesystem storage directories configured outside `server_data`.
 
+### Database backup before an update
+
 For a small Docker Compose deployment, a logical PostgreSQL backup is usually
-the easiest portable format:
+the easiest portable format. Run this from the repository root:
 
 ```bash
-docker compose exec postgres pg_dump -U fm_user -d family_messenger > circlus-backup.sql
+mkdir -p backups
+BACKUP_FILE="backups/circlus-db-$(date +%Y%m%d-%H%M%S).dump"
+docker compose --env-file deploy/.env exec -T postgres \
+  pg_dump -U fm_user -d family_messenger -Fc > "$BACKUP_FILE"
+docker compose --env-file deploy/.env exec -T postgres \
+  pg_restore --list < "$BACKUP_FILE" > /dev/null && \
+  echo "Database backup saved to $BACKUP_FILE"
 ```
+
+This creates a compressed PostgreSQL custom-format dump. The output redirection
+is handled by the VPS shell, so the dump is written to the host's `backups/`
+directory, not inside the PostgreSQL container. Removing or recreating that
+container therefore does not remove the dump. The `-T` option disables the
+Compose pseudo-terminal and keeps the binary dump stream intact. Do not
+continue with an update unless the final success message appears. Store another
+copy outside the VPS and do not place backups in Git.
 
 The application image runs as the unprivileged `node` user. The bundled named
 volume is created with a writable `/app/server/server-data` mount; custom bind
