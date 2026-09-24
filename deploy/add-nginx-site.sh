@@ -184,7 +184,9 @@ cat <<EOF
 [add-nginx-site] done: https://$domain -> http://127.0.0.1:$port
 
 Next steps:
-  1. Confirm renewal:  sudo certbot renew --cert-name $domain --dry-run
+  1. Optional. Certbot already scheduled automatic renewal at issuance. This
+     only checks that the renewal will succeed when it runs:
+       sudo certbot renew --cert-name $domain --dry-run
   2. Create the Circle for this domain from an official Circlus client.
      With server-admin access, use Settings -> Server Management. On a server
      that has no Circle yet, follow "First Circle Provisioning" in the README.
