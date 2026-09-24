@@ -238,6 +238,31 @@ sudo apt update
 sudo apt install nginx certbot python3-certbot-nginx
 ```
 
+### Automatic setup
+
+`deploy/add-nginx-site.sh` performs the whole sequence below for one domain.
+Run it from the repository root:
+
+```bash
+sudo ./deploy/add-nginx-site.sh circle.example.com
+```
+
+The proxy target port comes from `PORT` in `deploy/.env`, or `3000` when that
+file does not set it. Pass a different port as a second argument. Set
+`CERTBOT_EMAIL` to run Certbot without prompts.
+
+The script writes `/etc/nginx/sites-available/circle.example.com`, enables it,
+and checks the public HTTP readiness route before requesting the certificate,
+so a wrong DNS record or a conflicting site cannot consume Let's Encrypt rate
+limits. Certbot then installs the certificate and the HTTPS redirect. The
+script refuses to overwrite a site file it did not create, so an existing
+hand-written or Certbot-extended configuration is never replaced.
+
+Continue at [Circles](#circles) when the script reports success. The rest of
+this section is the equivalent manual sequence.
+
+### Manual setup
+
 Create the HTTP site before asking Certbot for a certificate:
 
 ```bash
@@ -399,6 +424,35 @@ afterward from a Circlus client.
 For additional Circles on the same server, use Server Management from an
 identity that already has server-admin access. Do not create or share long-lived
 host access secrets for routine Circle creation.
+
+## Adding Another Circle Domain
+
+A server that already hosts a Circle needs no second installation, no second
+container, and no claim token for a further Circle. One server process serves
+every Circle and resolves each one from the public `Host` header, so a new
+domain only needs DNS, an Nginx site, and a certificate.
+
+1. Point the new domain at the VPS with an `A` record and wait for it to
+   resolve.
+2. Give it HTTPS. Either run
+
+   ```bash
+   sudo ./deploy/add-nginx-site.sh second-circle.example.com
+   ```
+
+   or repeat [the manual sequence](#manual-setup) with a site file named after
+   the new domain. Do not reuse the `circlus-server` site file; each domain
+   gets its own file in `/etc/nginx/sites-available`.
+3. Check that `https://second-circle.example.com/ready` returns
+   `"status":"ok"`. This endpoint answers before any Circle exists for the
+   domain, so it confirms Nginx routing on its own.
+4. In an official Circlus client, open **Settings → Server Management** with an
+   identity that already has server-admin access on this server, and create the
+   Circle for the new domain.
+
+Both domains keep serving their own Circles. The new domain does not need its
+own `TURN_PUBLIC_HOST`; Circles on the same server share the configured TURN
+deployment.
 
 ## Database Migrations
 

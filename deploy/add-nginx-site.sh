@@ -185,6 +185,7 @@ cat <<EOF
 
 Next steps:
   1. Confirm renewal:  sudo certbot renew --cert-name $domain --dry-run
-  2. Create a Circle for this domain with a server-admin claim token.
-     See "First Circle Provisioning" in the README.
+  2. Create the Circle for this domain from an official Circlus client.
+     With server-admin access, use Settings -> Server Management. On a server
+     that has no Circle yet, follow "First Circle Provisioning" in the README.
 EOF
