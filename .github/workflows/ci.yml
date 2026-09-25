@@ -102,6 +102,9 @@ jobs:
           ./deploy/init-local-turn.sh
           grep -Eq '^MOBILE_CALL_ACTION_SECRET=.{32,}$' deploy/.env
           docker compose --env-file deploy/.env --profile local-turn config --quiet
+          set -a
+          . ./deploy/.env
+          set +a
           trap 'docker compose --env-file deploy/.env down' EXIT
           docker compose --env-file deploy/.env up -d --build --wait ice-config-service
           if ! node deploy/smoke-test-ice.mjs; then
