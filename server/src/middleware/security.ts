@@ -39,6 +39,16 @@ export function createCorsOptions(): CorsOptionsDelegate<TenancyRequest> {
   return async (req, callback) => {
     const options: CorsOptions = {
       origin(origin, originCallback) {
+        // Inspector has its own owner-approved request/session tokens. Allow
+        // its official origin only on this API, without trusting it for device
+        // enrollment, ordinary client APIs, or WebSocket registration.
+        // originalUrl keeps the full path inside mounted bootstrap routers.
+        const path = (req.originalUrl || req.url || '').split('?')[0];
+        if (origin === 'https://inspector.circlus.org'
+            && (path === '/api/inspector' || path.startsWith('/api/inspector/'))) {
+          originCallback(null, true);
+          return;
+        }
         void isTrustedClientRequestOrigin(origin, req.familyId).then((allowed) => {
           originCallback(null, allowed);
         }).catch((error) => {

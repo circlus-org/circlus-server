@@ -53,6 +53,11 @@ browsers. This origin is built in and no setting removes it.
 clients you operate or trust. A Circle owner can also add origins for one Circle
 through `extra_trusted_client_origins`.
 
+The official Inspector at `https://inspector.circlus.org` is allowed only on
+`/api/inspector` routes. It does not need to be added to
+`TRUSTED_CLIENT_ORIGINS`. Reading Circle data still requires an active Inspector
+session approved by the Circle owner.
+
 A trusted origin is a browser-level allowance, not an authentication decision.
 Signed identity operations require a device-key signature. Other endpoints use
 their own controls: for example, Inspector request polling requires the request
