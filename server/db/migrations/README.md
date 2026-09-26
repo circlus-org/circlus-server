@@ -1,11 +1,11 @@
 # Database Migrations
 
-The public Circlus Server repository starts from an open-source baseline and
-forward-only upgrades:
+Circlus Server applies these migrations in order. Existing installations skip
+files already recorded in `schema_migrations`:
 
 | Migration | Description |
 |-----------|-------------|
-| `001_initial_schema.sql` | Complete schema at the first public server release |
+| `001_initial_schema.sql` | Initial schema; fresh installations then apply `002`–`012` |
 | `002_managed_push_configuration.sql` | Managed Notification Central connection |
 | `003_archive_legacy_circle_membership_v1.sql` | Archive obsolete V1 membership state before signed V2 replacement |
 | `004_remove_server_admin_owner_recovery.sql` | Remove unsigned server-admin Circle ownership recovery |
@@ -18,14 +18,8 @@ forward-only upgrades:
 | `011_encrypt_private_link_and_device_metadata.sql` | Remove plaintext private link and device labels |
 | `012_encrypt_channel_metadata_and_reaction_codes.sql` | Encrypt channel metadata and make reaction values opaque to the server |
 
-Fresh installations apply this baseline automatically through `npm run migrate`
-or the bundled Docker Compose migrator service.
+Fresh installations apply all migrations through `npm run migrate` or the
+bundled Docker Compose migrator service.
 
-Future public schema changes should be added as new numbered migrations:
-
-```text
-010_describe_change.sql
-011_describe_next_change.sql
-```
-
-Do not edit migrations that may already have been published and deployed.
+Back up the database before updating. Do not edit migrations that have
+already been applied; the migrator checks their recorded checksums.

@@ -1,655 +1,138 @@
 # Circlus Server
 
-Self-hosted Circlus server for private circles, messaging, and WebRTC calls.
+Run Circlus on your own VPS for private Circles, messages, files, and calls.
+This repository contains the server, its database migrations, and a Docker
+Compose setup with PostgreSQL, ICE configuration, and an optional local TURN
+server. Use the [Circlus web client](https://web.circlus.org) or the
+[Android app](https://circlus.org/#clients) to connect.
 
-This repository contains the server component used by Circlus clients. The main expected setup is:
-
-- you run this server on your own VPS;
-- you create your own circles on that server;
-- users connect with the official Circlus web clients or mobile app;
-- advanced users may later run custom clients by adding their origins to the server configuration.
-
-For push delivery, the server integrates with the Circlus push service or
-another compatible push relay. Push delivery itself is not bundled into this
-server process.
-
-The public repository intentionally includes both `server/` and `shared/`.
-`shared/` contains TypeScript source types, small helpers, and protocol test
-vectors used by the server build. Generated JavaScript, declarations, and source
-maps are deliberately excluded so the repository remains source-only and does
-not expose build-machine paths.
-
-## Terminology
-
-Circlus uses **Circle** for the user-facing private group/tenant concept. Some
-internal database tables, column names, and code paths still use the older
-`family` naming (`family_id`, `family_config`, `family_domains`). In those
-places, `family` means a Circle/tenant, not the physical server or VPS. The
-physical server is represented separately by `VPS_ID` and server-admin records.
+This repository is for running your own server and inspecting what the server
+does with data it receives. Private messages and ordinary attachments are
+stored as ciphertext. The server still needs routing and access metadata, and
+it handles some deliberately public content and operational data in readable
+form. See [what the server can see](docs/DATA_VISIBILITY.md) for the boundaries
+and exceptions. Reviewing server code alone cannot establish how a client
+encrypts data or handles keys.
 
 ## Requirements
 
-- Docker and Docker Compose for the recommended setup
-- Node.js 24 LTS, PostgreSQL 15+, and npm for manual setup or development
-- Nginx and Certbot for the documented Ubuntu/Debian HTTPS setup
-
-## Quick Start
-
-```bash
-cp deploy/.env.example deploy/.env
-# Set TURN_PUBLIC_HOST to the public DNS name or IP used by clients.
-./deploy/init-local-turn.sh
-docker compose --env-file deploy/.env --profile local-turn up -d --build
-```
-
-Before starting, set the public address clients use for TURN in `deploy/.env`:
-
-```env
-TURN_PUBLIC_HOST=turn.example.com
-```
-
-The initialization script generates a stable random `VPS_ID` and PostgreSQL
-password when those fields are empty. It uses `TURN_PUBLIC_HOST` as `TURN_REALM`
-unless you set a separate realm. Existing values are kept on subsequent runs.
-Keep `deploy/.env` and `deploy/secrets/` across updates and backups.
-
-Before starting Compose, check for occupied host ports:
-
-```bash
-sudo ss -lntup | grep -E ':(80|443|3000|3090|3478)([^0-9]|$)' || true
-docker ps --format 'table {{.Names}}\t{{.Ports}}'
-```
-
-The API uses host loopback port `3000` (`PORT` in `deploy/.env`); the ICE
-Config Service uses loopback port `3090` (`ICE_CONFIG_HOST_PORT`). If port
-`3000` is occupied, set `PORT=3100` (or another free port) before starting
-Compose and point the reverse proxy to `127.0.0.1:3100`. The API still uses
-port `3000` inside its container. `ICE_CONFIG_HOST_PORT` can likewise be
-changed when occupied. PostgreSQL is not published on a host port. Existing listeners
-on `80` and `443` may be your reverse proxy; configure a virtual host for the
-Circle domain rather than starting a second proxy on those ports.
-
-Local coturn uses TCP and UDP port `3478`. Set `TURN_LISTEN_PORT` in
-`deploy/.env` **before** running `init-local-turn.sh` to use another free port.
-The script writes that port into the ICE URLs served to clients, so clients
-need no manual port setting. If you change the port after initialization,
-update both `TURN_LISTEN_PORT` and the URLs in
-`deploy/ice/turn-clusters.json`. Open the chosen TCP/UDP port and the
-configured UDP relay range (`49160-49200` by default) in the firewall.
-This local profile does not provide TURN/TLS on port 443.
-
-For Docker Compose, the app containers connect to the bundled PostgreSQL and
-ICE Config Service using internal service names. The initialization script
-creates local S2S/TURN secret files and an ICE cluster configuration without
-putting secret values in versioned JSON.
-
-The official client `https://web.circlus.org` is trusted automatically. To allow
-an additional self-hosted client, configure it explicitly, for example:
-
-```env
-TRUSTED_CLIENT_ORIGINS=https://client.example.com
-```
-
-This starts PostgreSQL, applies migrations once, starts the Node server and the
-local ICE Config Service, and enables coturn through the `local-turn` profile.
-Omit that profile when all configured TURN clusters are external. After the
-first Circle exists, its server administrator can request the standard Circlus
-push connection from **Settings → Server Management**. The approval service
-installs and verifies the credentials directly; the VPS owner does not copy a
-secret into `.env`.
-
-The bundled PostgreSQL configuration is intended for a small VPS. The default
-values are a good starting point for a 2 GB RAM server with light traffic. On a
-1 GB RAM server, reduce `shared_buffers` to `128MB` and `effective_cache_size`
-to `512MB` in `server/config/postgresql-small-server.conf`.
-
-After the containers are running:
-
-1. Follow [HTTPS with Nginx and Certbot](#https-with-nginx-and-certbot).
-2. Check that `https://your-circle-domain.example.com/ready` returns `ok`.
-3. Create a short-lived server-admin claim token.
-4. Open an official Circlus web client and create the first Circle from its
-   start screen, or from Server Management if you already have a profile.
-
-See [First Circle Provisioning](#first-circle-provisioning) for the full flow.
-
-### Connect push notifications
-
-Complete this after the first Circle and server administrator access exist:
-
-1. In the official client, open **Settings → Server Management** and select
-   this server.
-2. In **Push notifications**, select **Create connection request**. The code is
-   valid for 24 hours and can be used only for this server.
-3. Select **Open support contact**. If this is your first visit, complete the
-   guest registration. The generated request is already placed in the visible
-   message field; review it and send it.
-4. Wait for approval in the same Circlus conversation. The maintainer can ask
-   questions there. On approval, the provisioning service registers the server,
-   sends the credentials directly to it, and verifies authentication.
-5. Return to Server Management and refresh the push status. It should show
-   **Connected and ready**.
-
-The conversation contains only a short-lived installation claim. The permanent
-push secret is generated after approval and is never sent through chat. The
-server encrypts that secret with `deploy/secrets/push-config-encryption.secret`;
-back up this file together with the database and the other files in
-`deploy/secrets/`.
-
-## Manual Setup
-
-For a non-Docker deployment:
-
-```bash
-cd server
-npm install
-cp .env.minimal.example .env
-# edit .env
-./init-db.sh
-npm run build
-npm start
-```
-
-`./init-db.sh` is only for a fresh local installation: it invokes the explicitly
-destructive `reset-local-database.sh`, which drops and recreates the configured
-database after confirmation. Never use it to update an existing installation;
-use `npm run migrate` for updates.
-
-For development:
-
-```bash
-npm run dev
-```
-
-## Configuration
-
-Use `.env.minimal.example` for first deployment and `.env.example` as the complete reference.
-
-Important settings:
-
-- `DATABASE_URL`: PostgreSQL connection string.
-- `VPS_ID`: stable identifier for this physical server.
-- `TRUST_PROXY=1`: recommended when running behind one trusted reverse proxy.
-- `TRUSTED_CLIENT_ORIGINS`: additional custom web client origins allowed by CORS;
-  `https://web.circlus.org` is always trusted.
-- `PUSH_SERVICE_*`: optional legacy server-to-server authentication for push
-  delivery. A managed configuration installed from Server Management is stored
-  encrypted in PostgreSQL and takes precedence. Environment variables remain a
-  compatibility fallback only while no managed configuration row exists.
-- `ICE_CONFIG_*`: server-to-server authentication for TURN/ICE configuration.
-- `CALL_SIGNALING_DIAGNOSTICS=false`: keep disabled in production unless debugging calls.
-- `CALL_ICE_DIAGNOSTICS=false`: keep disabled in production unless debugging WebRTC connectivity.
-
-### Logging and request correlation
-
-Production logs use one JSON object per line by default. Set `LOG_LEVEL` to
-`debug`, `info`, `warn`, `error`, or `silent`; set `LOG_FORMAT=pretty` only for
-interactive local development. Operator-facing commands under `src/scripts`
-retain human-readable terminal output.
-
-Every HTTP response includes `X-Request-ID`. A caller may supply that header
-when it contains only safe identifier characters and is at most 128 characters;
-otherwise the server generates a UUID. Logs produced while handling that HTTP
-request include the request id and, after tenant resolution, the internal Circle id.
-The server does not intentionally log request bodies, authorization headers,
-push payloads, delivery tokens, subscription endpoints, or encryption keys.
-
-## ICE/TURN Configuration
-
-Circlus uses a separate ICE config service to issue WebRTC `iceServers`. The
-main server does not store coturn secrets directly. Instead, it calls the ICE
-config service from `GET /api/config/ice-servers` and
-`POST /api/config/turn-credentials`. The public repository includes a local
-deployment of that service and an optional local coturn profile. It can also be
-configured with external TURN clusters.
-
-The main server requires:
-
-```env
-ICE_CONFIG_SERVICE_URL=https://ice.example.com
-ICE_CONFIG_KEY_ID=k1
-ICE_CONFIG_SHARED_SECRET=base64-random-secret
-# Alternative for Docker secrets:
-# ICE_CONFIG_SHARED_SECRET_FILE=/run/secrets/ice_s2s
-```
-
-`ICE_CONFIG_SERVER_ID` is optional and defaults to `VPS_ID`. It identifies this
-server instance to the ICE config service; it is not a circle id and not a
-user/client id.
-
-Leave `ICE_CONFIG_*` empty while managed TURN access is pending. Messaging,
-circles, identities, and direct peer-to-peer calls can still work, but TURN
-credentials cannot be issued and calls may fail on restrictive networks.
-
-See `deploy/README.md` for running only ICE Config Service and coturn next to an
-existing PM2-managed Circlus Server.
-
-## HTTPS with Nginx and Certbot
-
-This is the supported beginner path for an Ubuntu or Debian VPS. It assumes
-that the chosen domain already has an `A` record pointing to the VPS and that
-TCP ports 80 and 443 are allowed by the hosting firewall. The same domain may
-also be `TURN_PUBLIC_HOST`; HTTPS uses ports 80/443 while local TURN uses 3478.
-
-Install Nginx, Certbot, and its Nginx plugin:
-
-```bash
-sudo apt update
-sudo apt install nginx certbot python3-certbot-nginx
-```
-
-### Automatic setup
-
-`deploy/add-nginx-site.sh` performs the whole sequence below for one domain.
-Run it from the repository root:
-
-```bash
-sudo ./deploy/add-nginx-site.sh circle.example.com
-```
-
-The proxy target port comes from `PORT` in `deploy/.env`, or `3000` when that
-file does not set it. Pass a different port as a second argument. Set
-`CERTBOT_EMAIL` to run Certbot without prompts.
-
-The script writes `/etc/nginx/sites-available/circle.example.com`, enables it,
-and checks the public HTTP readiness route before requesting the certificate,
-so a wrong DNS record or a conflicting site cannot consume Let's Encrypt rate
-limits. Certbot then installs the certificate and the HTTPS redirect. The
-script refuses to overwrite a site file it did not create, so an existing
-hand-written or Certbot-extended configuration is never replaced.
-
-Continue at [Circles](#circles) when the script reports success. The rest of
-this section is the equivalent manual sequence.
-
-### Manual setup
-
-Create the HTTP site before asking Certbot for a certificate:
-
-```bash
-sudo cp deploy/nginx/circlus-server.conf.example \
-  /etc/nginx/sites-available/circlus-server
-sudo nano /etc/nginx/sites-available/circlus-server
-```
-
-Replace `circle.example.com` with the Circle domain. If `PORT` in
-`deploy/.env` is not `3000`, replace `127.0.0.1:3000` with the selected port.
-Then enable and reload the site:
-
-```bash
-sudo ln -sfn /etc/nginx/sites-available/circlus-server \
-  /etc/nginx/sites-enabled/circlus-server
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-Give Nginx time to replace its workers, then verify the public HTTP route in a
-separate step:
-
-```bash
-sleep 2
-curl --fail --show-error http://circle.example.com/ready
-```
-
-Continue only when this returns JSON with `"status":"ok"`. A 404 usually
-means that Nginx is still serving another/default site or that `server_name`
-does not exactly match the domain. A connection failure usually means that
-DNS, port 80, or a hosting firewall is not ready.
-
-Now request the certificate and let Certbot add HTTPS and the HTTP redirect:
-
-```bash
-sudo certbot --nginx --redirect -d circle.example.com
-```
-
-Enter an email address and accept the Let's Encrypt terms when prompted. Then
-verify HTTPS and automatic renewal:
-
-```bash
-sleep 2
-curl --fail --show-error https://circle.example.com/ready
-sudo certbot renew --cert-name circle.example.com --dry-run
-```
-
-Both readiness requests must return JSON with `"status":"ok"`. Certbot's
-Nginx flow requires the HTTP site to be publicly reachable on port 80 before
-certificate issuance. `--cert-name` limits this installation check to the new
-certificate; Certbot's scheduled renewal still handles every managed
-certificate. See the official [Certbot instructions](https://certbot.eff.org/instructions).
-
-The example preserves the original `Host`, overwrites forwarded client headers,
-and supports WebSocket upgrades. Keep `TRUST_PROXY=1` when the API is reachable
-only through this Nginx instance. The bundled Compose file exposes the API only
-on host loopback. PostgreSQL is not published on a host port.
-
-## Circles
-
-After the server is running, create circles from the Server Management page
-using a short-lived server-admin claim token. The server stores circle/domain
-mappings in PostgreSQL and uses them to route API and WebSocket requests.
-
-### Emergency deletion after complete identity loss
-
-If every device holding a Circle owner identity has been lost, SSH access can
-delete that Circle without resetting the other Circles or the whole database.
-List all Circles and their current domains, identifiers, status, member and
-guest counts, total identities, and active device counts:
-
-```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
-  npm run tenant:list:prod
-```
-
-Use `npm run tenant:list:prod -- --json` inside the container when
-machine-readable output is preferable. The next command only inspects the
-selected target:
-
-```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
-  npm run tenant:delete:prod -- --host=circle.example.com
-```
-
-Copy the reported `Family ID`, then repeat the command with explicit
-confirmation. If multiple Circles share the host, the inspection command also
-requires `--family-id=THE_SELECTED_FAMILY_ID` and refuses to choose one
-automatically:
-
-```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
-  npm run tenant:delete:prod -- --host=circle.example.com \
-  --family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND \
-  --confirm-family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND
-```
-
-Deletion is irreversible and removes all server-side data for that Circle,
-including any server-admin grant carried by one of its identities. Other
-Circles remain intact. Reusing the domain creates a new Circle with new
-identifiers, keys, and membership history.
-
-## First Circle Provisioning
-
-The Docker or manual setup only starts the empty server. A Circle is created
-afterward from a Circlus client.
-
-1. Point the chosen first Circle domain at the VPS, complete
-   [HTTPS with Nginx and Certbot](#https-with-nginx-and-certbot), and check that
-   its HTTPS `/ready` endpoint works. This domain can also be
-   `TURN_PUBLIC_HOST` when TURN uses port 3478.
-2. From the repository root on a Docker Compose installation, create a
-   one-time server-admin claim token:
+- A Linux VPS with Docker and Docker Compose. A 2 GB RAM VPS is a practical
+  starting point for a small Circle.
+- A domain or subdomain pointing to the VPS for the first Circle.
+- TCP ports 80 and 443 for HTTPS; TCP and UDP port 3478 plus UDP ports
+  49160–49200 for the default local TURN setup. Adjust these if you change the
+  TURN ports in `deploy/.env`.
+
+The instructions below use Ubuntu or Debian for Nginx and Certbot. See
+[deployment details](deploy/README.md) for ports, additional Circle domains,
+and backups.
+
+## Install with Docker Compose
+
+1. Copy the deployment settings and set the public address for TURN. The Circle
+   domain can also be used for TURN on port 3478.
 
    ```bash
-   docker compose --env-file deploy/.env --profile local-turn exec \
-     -e LOG_LEVEL=warn server \
+   cp deploy/.env.example deploy/.env
+   nano deploy/.env
+   ```
+
+   Set at least:
+
+   ```env
+   TURN_PUBLIC_HOST=circle.example.com
+   ```
+
+2. Generate local credentials and start the stack:
+
+   ```bash
+   ./deploy/init-local-turn.sh
+   docker compose --env-file deploy/.env --profile local-turn up -d --build
+   ```
+
+   The initializer creates a stable `VPS_ID`, database password, ICE/TURN
+   configuration, and secret files. Keep `deploy/.env`, `deploy/secrets/`, and
+   `deploy/ice/turn-clusters.json` when updating or restoring the server.
+
+3. Install Nginx and Certbot, then set up HTTPS for the Circle domain:
+
+   ```bash
+   sudo apt update
+   sudo apt install nginx certbot python3-certbot-nginx
+   sudo ./deploy/add-nginx-site.sh circle.example.com
+   curl --fail --show-error https://circle.example.com/ready
+   ```
+
+   The domain must already resolve to this VPS. The setup script checks HTTP
+   routing before requesting a certificate. The readiness request should return
+   JSON with `"status":"ok"`. If you already manage Nginx, see the
+   [included proxy example](deploy/nginx/circlus-server.conf.example).
+
+4. Create a one-time server administrator claim token:
+
+   ```bash
+   docker compose --env-file deploy/.env exec -e LOG_LEVEL=warn server \
      npm run server-admin:create-claim:prod -- --ttl-hours=1
    ```
 
-   For a manual installation, run
-   `cd server && npm run server-admin:create-claim -- --ttl-hours=1` instead.
+5. Open the [Circlus web client](https://web.circlus.org). On the start screen,
+   choose **Create a Circle on your own server**. Enter the HTTPS server URL and
+   the claim token. If you already have a profile, use **Settings → Server
+   Management → Connect a new server** instead.
 
-3. Open either the official web client at `https://web.circlus.org` or the
-   [Circlus Android app on Google Play](https://play.google.com/store/apps/details?id=org.circlus.client).
-   While Google Play testing is closed, [ask the project maintainer](https://circlus.org/#contact)
-   to add your Google account to the tester list before downloading the app.
-   The listing is visible only to admitted tester accounts; the official APK is also available from
-   [Circlus Android Releases](https://github.com/circlus-org/circlus-android-releases/releases).
-   Both clients use the same first-Circle flow. With no existing profile,
-   choose **Create a Circle on your own server** on the start screen. With an
-   existing profile, open the **Settings** tab in the Circlus app, choose
-   **Server Management**, open the **Server** drop-down list, and select
-   **Connect a new server**.
+### Push notifications
 
-   `https://web.circlus.org` is allowed by the server automatically. Before
-   using another web client, add its exact origin to `deploy/.env` (multiple
-   origins are comma-separated) and recreate the server container so it reads
-   the updated environment:
+After creating a Circle, open **Settings → Server Management → Push
+notifications** in the client and create a connection request. Send the
+pre-filled request through the support contact opened by the app. Once approved,
+refresh the push status until it shows **Connected and ready**. Credentials are
+installed directly on the server; keep
+`deploy/secrets/push-config-encryption.secret` in backups.
 
-   ```env
-   TRUSTED_CLIENT_ORIGINS=https://client.example.com
-   ```
+## Updating and backups
 
-   ```bash
-   docker compose --env-file deploy/.env --profile local-turn up -d \
-     --force-recreate server
-   ```
+Before updating, back up **both** PostgreSQL and the Docker `server_data` volume.
+Also preserve `deploy/.env`, `deploy/secrets/`, and
+`deploy/ice/turn-clusters.json`. The database dump alone does not contain file
+attachments. See [backup instructions](deploy/README.md#backups).
 
-4. Enter:
-
-   - the HTTPS base URL of your server, for example `https://circle.example.com`;
-   - the claim token from the command above.
-
-5. Create the first Circle. The app registers an owner identity on that Circle;
-   this identity also gains server administrator access. No Circle needs to
-   exist before this step.
-
-For additional Circles on the same server, use Server Management from an
-identity that already has server-admin access. Do not create or share long-lived
-host access secrets for routine Circle creation.
-
-## Adding Another Circle Domain
-
-A server that already hosts a Circle needs no second installation, no second
-container, and no claim token for a further Circle. One server process serves
-every Circle and resolves each one from the public `Host` header, so a new
-domain only needs DNS, an Nginx site, and a certificate.
-
-1. Point the new domain at the VPS with an `A` record and wait for it to
-   resolve.
-2. Give it HTTPS. Either run
-
-   ```bash
-   sudo ./deploy/add-nginx-site.sh second-circle.example.com
-   ```
-
-   or repeat [the manual sequence](#manual-setup) with a site file named after
-   the new domain. Do not reuse the `circlus-server` site file; each domain
-   gets its own file in `/etc/nginx/sites-available`.
-3. Check that `https://second-circle.example.com/ready` returns
-   `"status":"ok"`. This endpoint answers before any Circle exists for the
-   domain, so it confirms Nginx routing on its own.
-4. In an official Circlus client, open **Settings → Server Management** with an
-   identity that already has server-admin access on this server, and create the
-   Circle for the new domain.
-
-Both domains keep serving their own Circles. The new domain does not need its
-own `TURN_PUBLIC_HOST`; Circles on the same server share the configured TURN
-deployment.
-
-## Database Migrations
-
-The public server repository starts from an initial schema baseline in
-`server/db/migrations/001_initial_schema.sql`. Schema changes are added as
-forward-only numbered migrations in the same directory.
-Migrations are applied with `npm run migrate` and tracked in the database via
-`schema_migrations`.
-
-With Docker Compose, the `migrate` service runs before the server starts. For a
-manual deployment, run migrations explicitly after updating code:
+Then, from the repository root:
 
 ```bash
-cd server
-npm run migrate
-```
-
-The runtime exposes three unauthenticated probe endpoints:
-
-- `/live` reports that the Node process is running and does not query external
-  dependencies;
-- `/ready` returns HTTP 200 only after startup is complete and PostgreSQL
-  answers a probe query;
-- `/health` is a backwards-compatible alias for `/ready`.
-
-Readiness becomes unavailable before graceful shutdown starts, so a reverse
-proxy or orchestrator can stop sending new work while existing HTTP requests,
-WebSocket messages, and background jobs drain.
-
-The current API runtime intentionally supports one active process per database.
-Request nonces, rate limits, WebSocket presence, and signaling routes are held
-in process memory, and startup enforces this constraint with a PostgreSQL
-advisory lock. Scale TURN or a future SFU independently; do not add API replicas
-until these process-local components have a shared coordination layer.
-
-## Updating
-
-Before updating a production server, create and verify a
-[database backup](#database-backup-before-an-update). Do not continue with the
-update if the backup command or its validation fails.
-
-For Docker Compose deployments:
-
-```bash
-git pull
+git pull --ff-only
 ./deploy/init-local-turn.sh
 docker compose --env-file deploy/.env --profile local-turn up -d --build
 ```
 
-Run these commands from the repository root. The initialization command keeps
-existing values and secrets and creates any secret file introduced by the new
-version. Omit `--profile local-turn` from Compose if
-your configured TURN clusters are external. Use the same Compose project name
-as the original installation so its named data volumes remain attached. The
-Compose setup runs migrations before starting the updated server process.
+Keep the same Compose project name as the original installation. The
+`migrate` service applies pending database migrations before the server starts.
 
-For manual deployments:
+## Configuration and troubleshooting
 
-```bash
-git pull
-cd server
-npm install
-npm run build
-npm run migrate
-npm start
-```
+`deploy/.env.example` lists deployment settings; `server/.env.example` is the
+complete server setting reference. The API and ICE Config Service listen on
+host loopback ports 3000 and 3090 by default. PostgreSQL has no host port.
 
-Use your process manager, such as `systemd` or `pm2`, to restart the production
-process if you do not run `npm start` directly.
+- **HTTPS fails:** check DNS, ports 80/443, and the Nginx site. The public
+  `/ready` endpoint should return `"status":"ok"`.
+- **The client cannot connect:** check HTTPS and the server logs.
+- **Calls fail on some networks:** check the TURN host, firewall ports, and
+  [TURN ports](deploy/README.md#host-ports).
+- **Push does not arrive:** check the connection status in Server Management.
+- **Migration fails:** check PostgreSQL connectivity and whether an applied SQL
+  migration was changed. Do not edit applied migrations.
 
-## API compatibility
+[Deployment details](deploy/README.md) cover ports, additional Circle domains,
+backups, and emergency deletion after owner identity loss. [Security policy](SECURITY.md) explains how to report vulnerabilities.
 
-Circlus clients may update sooner than self-hosted servers. The public
-`GET /api/config/capabilities` endpoint exposes a cumulative `apiLevel`,
-optional runtime feature overrides, and client-facing limits. Server forks and
-custom clients must preserve the published level semantics instead of deriving
-compatibility from the package version.
-
-See the normative
-[Server capabilities contract](docs/SERVER_CAPABILITIES.md) before
-adding, removing, disabling, or changing a client-visible server capability.
-
-## Backup and Restore
-
-At minimum, back up:
-
-- PostgreSQL data;
-- `deploy/secrets/`, including `push-config-encryption.secret` needed to decrypt
-  managed push credentials;
-- the Docker `server_data` volume, which contains encrypted attachments, public
-  site assets, generated sites, and local Circle migration packages;
-- the server `.env`;
-- reverse proxy configuration;
-- any custom filesystem storage directories configured outside `server_data`.
-
-### Database backup before an update
-
-For a small Docker Compose deployment, a logical PostgreSQL backup is usually
-the easiest portable format. Run this from the repository root:
-
-```bash
-mkdir -p backups
-BACKUP_FILE="backups/circlus-db-$(date +%Y%m%d-%H%M%S).dump"
-docker compose --env-file deploy/.env exec -T postgres \
-  pg_dump -U fm_user -d family_messenger -Fc > "$BACKUP_FILE"
-docker compose --env-file deploy/.env exec -T postgres \
-  pg_restore --list < "$BACKUP_FILE" > /dev/null && \
-  echo "Database backup saved to $BACKUP_FILE"
-```
-
-This creates a compressed PostgreSQL custom-format dump. The output redirection
-is handled by the VPS shell, so the dump is written to the host's `backups/`
-directory, not inside the PostgreSQL container. Removing or recreating that
-container therefore does not remove the dump. The `-T` option disables the
-Compose pseudo-terminal and keeps the binary dump stream intact. Do not
-continue with an update unless the final success message appears. Store another
-copy outside the VPS and do not place backups in Git.
-
-The application image runs as the unprivileged `node` user. The bundled named
-volume is created with a writable `/app/server/server-data` mount; custom bind
-mounts must grant that user write access without making the whole container
-privileged.
-
-The database dump does not contain attachment payload files. Back up the
-`server_data` volume separately, or use your VPS/provider volume snapshot
-facility. Database and filesystem backups should be taken as one maintenance
-operation so their metadata remains consistent.
-
-To restore on a fresh server, recreate the same `.env` values, start PostgreSQL,
-restore the dump, then start the Circlus server and run migrations if needed.
-Keep `VPS_ID` stable for the same physical/logical server unless you
-intentionally migrate to a new server identity.
-
-Do not publish backups. They may contain encrypted user data, metadata,
-invites, device records, and server-admin records.
-
-## PgTyped
-
-The generated `server/src/db/repositories/*.queries.ts` files are committed so a clean clone can build without a live PostgreSQL database.
-
-After changing SQL query files or migrations, run:
-
-```bash
-cd server
-npm run types:generate
-npm run build
-npm test -- --runInBand
-```
-
-Commit the updated generated files.
-
-## Verification
-
-Before deploying or opening a pull request:
-
-```bash
-cd server
-npm run build
-npm test -- --runInBand
-npm run lint
-```
-
-## Troubleshooting
-
-This section intentionally starts small. Please open an issue if you hit a setup
-problem that is not covered here.
-
-- Hosted web client cannot connect: check HTTPS, `TRUSTED_CLIENT_ORIGINS`, and
-  browser console CORS errors.
-- Circle/domain is not found: check that the reverse proxy preserves the
-  original `Host` header and that the Circle was created for the domain you are
-  using.
-- Calls fail on some networks: leave `ICE_CONFIG_*` empty only while TURN access
-  is pending; without TURN, restrictive NATs can prevent calls.
-- Push notifications do not arrive: managed push credentials may be missing,
-  pending approval, or `ENABLE_RELAY_DELIVERY` may still be `false`.
-- Migrations fail: check `DATABASE_URL`, PostgreSQL reachability, and whether an
-  old migration was edited after being applied.
-
-## Repository Layout
-
-```text
-server/   Node.js/Express/WebSocket server
-shared/   shared TypeScript types and helpers used by the server
-```
+For a closer look at server behavior, see [data visibility](docs/DATA_VISIBILITY.md),
+[capabilities](docs/SERVER_CAPABILITIES.md),
+[request reliability](docs/REQUEST_RELIABILITY.md),
+[HTTP signaling](docs/HTTP_SIGNALING.md), and
+[WebSocket limits](docs/WEBSOCKET_LIMITS.md). Deployment questions and ideas
+about the protocol or product can be discussed in GitHub issues. Please report
+suspected vulnerabilities privately as described in the security policy.
 
 ## License
 
-MIT
-
-## Signed request protocol updates
-
-The first public baseline `001_initial_schema.sql` requires the updated client for
-operation IDs, versioned writes, bounded history clear and temporary-access ACK.
-See [request reliability](docs/REQUEST_RELIABILITY.md) for rollout, retry semantics,
-retention and the limits of database replay protection.
-
-WebSocket connections have bounded incoming/outgoing queues, connection limits
-and registration deadlines by default. See [WebSocket resource limits](docs/WEBSOCKET_LIMITS.md)
-for configuration, overload behavior and capacity-testing requirements.
+MIT. See [LICENSE](LICENSE).

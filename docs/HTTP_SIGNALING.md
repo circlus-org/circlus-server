@@ -1,10 +1,8 @@
 # HTTP signaling and WS handover
 
-The existing Android HTTP signaling transport is extended to protocol 2 and is
-also used by the web client. It runs the same authenticated registration and
-message handlers as WS, including Circle freeze, actor scope and call checks.
-Native call registrations remain scoped to their call; web registrations retain
-their existing scope. This is not a new grant of access.
+Protocol 2 provides acknowledged HTTP signaling for clients that cannot keep
+a WebSocket connection. It uses the same authenticated registration and message
+handlers as WebSocket signaling, including Circle and call authorization.
 
 ## Delivery contract
 
@@ -23,11 +21,10 @@ The existing `/api/mobile/calls/signaling/*` routes accept protocol 2:
   allowed; a cancelled request releases the poll slot.
 - `close`: POST with the bearer header. Sessions also expire after inactivity.
 
-Tokens are random bearer credentials, held in memory and kept out of URLs by
-updated clients. Requests are scoped to the original Circle and browser Origin.
-The legacy native protocol remains accepted, but its destructive reads do not
-provide protocol 2's lost-response guarantee. Release the updated clients and
-server together. Android now refreshes registration signatures for each attempt.
+Tokens are random bearer credentials, held in memory and kept out of URLs.
+Requests are scoped to the original Circle and browser Origin. Native protocol 1
+remains accepted, but its destructive reads do not provide protocol 2's
+lost-response guarantee.
 
 Delivery state lives in this API process. Session restart, server restart and
 switching transports require fresh registration and existing application/call
@@ -64,7 +61,7 @@ client free of server resource cost.
 The web client advertises top-level `httpFallback: true` on the WS registration frame,
 outside the signed `data`. This
 only opts that connection into optional handover; it is not an authorization or
-priority claim. Old clients are not voluntarily evicted by the soft policy.
+priority claim. Connections without this opt-in are not voluntarily evicted by the soft policy.
 Above the soft limit (clamped to the hard limit), at most one eligible connection
 per second is sent `transport:defer` with `retryAfterMs: 60000`, then closed with
 1013. Candidates are registered, idle for at least 30 seconds, have no running
@@ -79,49 +76,9 @@ sessions or pending writes. A failed attempt restores HTTP fallback. Direct
 messages use their ordinary HTTP API while the WS transport is absent; other
 existing control events can travel through the HTTP event queue.
 
-## Verification
-
-Server: build, lint, Jest (including ACK, retransmission, tenant/origin isolation,
-capacity and soft-limit protection), and `npm run test:http-signaling` for actual
-loopback HTTP connections with lost responses. The test uses a synthetic
-registration handler; real authentication is covered by registration unit tests.
-Client: build, `npm run test:http-signaling`, architecture tests. Android: Kotlin
-compilation. The system-test reconnect scenario permits the WS cooldown.
-Actual mobile calls through TURN and overload behavior on a 2 GiB VPS still
-require the separate release test environment.
-
-System-test regressions are described in
-`system-tests/RELIABILITY_SCENARIOS.md` in the development repository: lost poll
-redelivery/ACK, WS return, and an HTTP-only offer/decline with lost send and poll
-responses. Added scenarios have typecheck/discovery validation only until the
-full clean system-test run; they do not establish TURN or native mobile behavior.
-
-## Destination isolation and idle polling
+## Destination isolation
 
 The web client's WS-to-HTTP cooldown is scoped to the destination origin
 (hostname, scheme and port), retained when switching circles and discarded on
 expiry. Distinct domains remain independent even when they share a physical
 server. A repeated defer cannot shorten an existing cooldown.
-
-An idle server poll waits for an enqueue notification, cancellation, session
-closure or its deadline, without checking the queue every 250 ms. Wakeup clears
-the deadline timer and abort listener. Protocol 1 and protocol 2 keep their
-existing delivery and acknowledgement semantics.
-
-## Deferred product decision: guest presence
-
-Guest presence behavior is unchanged in this transport update. Fully silent
-idle guests/subscribers and a redesign of background synchronization are deferred.
-
-Desired future behavior: opening the application or another circle must not
-advertise a guest as online to every host. Opening the relevant conversation,
-the host's contact card, preparing a call or communicating in that context may
-publish presence for that relationship. Last-seen should reflect that same
-context; push delivery and permission to call remain independent of presence.
-
-Sending heartbeats only to the active circle is a first step, but is insufficient
-if one guest identity has several host contacts in that circle: strict isolation
-then requires presence scoped to the relationship. Before implementation, define
-whether contact-card viewing counts as online, the grace period after leaving,
-and aggregation across the guest's devices. Camera preview remains local and
-must not itself publish media. Call preparation may establish signaling.

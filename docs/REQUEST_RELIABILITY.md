@@ -1,9 +1,8 @@
 # Signed request reliability
 
-This protocol is included in the first public baseline `001_initial_schema.sql`.
-Deploy the updated client and server together. Older clients lack required fields
-on affected mutations and will receive a validation error; do not silently fall
-back to unversioned writes.
+This document describes how signed mutations are retried and how concurrent
+writes are checked. It provides background for reviewing server behavior and
+diagnosing request failures.
 
 ## Authentication and retries
 
@@ -40,16 +39,12 @@ retrievable for 30 days. Thereafter the server returns a conflict and retains a
 tombstone, rather than executing the action again. Expired response bodies are
 removed in bounded batches. Result tombstones, resource versions and message-send
 receipts are retained without a time limit; include them in database backups and
-capacity planning. Circle migration transfers these three tables too, changing
-the migration-contract fingerprint: both migration endpoints must be updated.
-The global short-lived nonce table is not transferred by a Circle migration.
+capacity planning. Circle migration transfers these three tables; the global
+short-lived nonce table is not transferred.
 
-The web client journals pending IDs by signer/type/payload fingerprint in local
-storage and preserves them after transport failures, authentication failures and
-transient server errors. It removes them after success or terminal validation/
-conflict responses. Regenerating encrypted content creates a different payload
-and is therefore a new intent; an arbitrary manual UI repetition is not always
-a retry. The native call-event sender derives a stable ID from the event itself.
+Clients should retain an operation ID across transport failures and transient
+server errors. Regenerating encrypted content changes the payload and requires a
+new operation ID; an arbitrary manual repetition is not necessarily a retry.
 
 ## Conflicts and destructive operations
 
@@ -69,8 +64,8 @@ a retry. The native call-event sender derives a stable ID from the event itself.
   overwrite a newer accepted intent. This is client-time ordering, not a strict
   expected-version snapshot: concurrent devices need reasonably synchronized
   clocks; equal timestamps use the random suffix as a tie breaker. More than
-  60 seconds in the future is rejected. Recovery now uses strict server versions
-  (initial public baseline, below); revoked binding IDs still cannot be activated again.
+  60 seconds in the future is rejected. Recovery uses strict server versions
+  (below); revoked binding IDs still cannot be activated again.
 - Admin and owner claims are consumed in the same transaction as the grant.
   The same recipient can recover the original result; another recipient cannot
   redeem the used claim. Replaying a consumed claim never re-grants revoked rights.
@@ -89,7 +84,7 @@ The client journals pending ACK metadata and retries it through the foreground/
 online grant supervisor, including after restart; no transferred keys are stored
 in this journal. Request expiry still bounds payload availability.
 
-## Limits and verification
+## Limits
 
 These guarantees cover local database effects. WebSocket notifications and
 external push delivery remain best effort; an external service cannot be made
@@ -99,20 +94,11 @@ cleanup and reconciliation remain necessary after partial storage failures.
 Ordinary settings and permission mutations outside the explicit operation list
 retain their existing conflict semantics. Never retry every mutation indiscriminately.
 
-Run `npm run build`, `npm test -- --runInBand` and `npm run lint` in `server`.
-For real PostgreSQL regressions, create a disposable empty database whose name
-ends with `_reliability_test`, set `RELIABILITY_TEST_DATABASE_URL` to its URL, then
-run `npm run test:reliability`. The script refuses a nonempty database, installs
-the public baseline, reapplies the upgrade, and exercises concurrency, pool
-reinitialization, lost-response retries, expiry and transaction rollback. Exported
-CI runs these checks against its own disposable PostgreSQL service.
+## Server versions for access changes
 
-## Server versions for access changes (initial public baseline)
-
-The first public baseline and the matching client/server release
-add strict server-issued revisions for the 20 operations in
+The server issues strict revisions for the operations in
 `shared/accessOperations.ts`: recovery bind/revoke, call whitelist add/remove,
-participant role/invitation permission/disable/enable, guest permission/revoke,
+participant role/invitation permission/disable/enable, guest permission/revoke/delete,
 server-admin grant/revoke, Circle suspend/resume, channel subscription and author
 remove/restore, public-site visibility and administrator-status disclosure.
 Channel titles/descriptions, guest presentation defaults and group mute settings
@@ -135,9 +121,9 @@ without executing again, even if the rights have since changed. Reusing that ID
 with another version/path/payload is rejected. Revision comparison does not use
 client clocks; the general timestamp/operation-ID age validation still applies.
 
-A stale new mutation returns HTTP 409 `ACCESS_VERSION_CONFLICT`. The web client
-shows a localized instruction to refresh the screen, review current rights and
-confirm the action again; it does not silently refresh the version and retry.
+A stale new mutation returns HTTP 409 `ACCESS_VERSION_CONFLICT`. The client
+should refresh and review the current rights before creating a new action; it
+must not silently replace the expected version and retry.
 The preflight version protects an action from changes **after its first attempt**;
 it is not a claim that an arbitrary UI draft was based on the latest displayed
 state. Where signed membership transitions already carry their own predecessor,
@@ -152,48 +138,24 @@ An external write and a versioned mutation can produce a PostgreSQL deadlock;
 the aborted transaction rolls back, and a retry retains its original expected
 version. External notifications/files are still not atomic with the database.
 
-Old clients fail closed on these mutations. New clients do not attempt a mutation
-if the new version endpoint is unavailable; there is no unversioned fallback.
-Deploy the migration, API and web bundle together, including the Android embedded
-web bundle. Recovery discovery/restoration after total server loss remains a
-separate deferred feature.
+## Legacy call-event requests
 
-Validation: the disposable PostgreSQL reliability script installs the public baseline
-without private migrations and tests competing writes, external-writer invalidation, cached replay
-without regrant, failed-transaction rollback, scope and validation errors. The
-HTTP operation registry test requires every listed route to have the versioned
-wrapper. Client tests cover persisted versions, new explicit intent after conflict
-and separation by server/destination. The system suite adds a delayed permission
-grant behind a newer grant/revoke; run that suite on fresh candidate images.
-
-## Temporary call-event compatibility for the server-first rollout
-
-`POST /api/calls/handling-event` temporarily accepts an absent `operationId` using
-its previous handler. Signature/nonce validation, active-identity and call-participant
+`POST /api/calls/handling-event` accepts an absent `operationId` using
+its legacy handler. Signature/nonce validation, active-identity and call-participant
 checks still apply. A supplied ID always uses strict reliable-operation validation;
 null, empty or malformed IDs are rejected, not downgraded. Valid new requests keep
 transactional replay protection. Legacy requests can repeat their effects after a
-lost response. This exception is local to handling-event and is intended for removal
-in the next release after clients update; it does not enable legacy access
-mutations. Push registration has its own narrow exception below. No database migration or automatic time-based cutoff is introduced.
+lost response. This exception is local to handling-event; it does not enable
+unversioned access mutations.
+Push registration has its own narrow exception below.
 
-## Temporary push-registration compatibility for the server-first rollout
+## Legacy push-registration requests
 
 `POST /api/mobile/devices/delivery-tokens/register` and `POST /api/push/subscribe`
-accept authenticated legacy requests with no `operationId`. This permits token
-renewal and subscription registration while an Android client still runs an old
-web bundle. Signature, timestamp, nonce, device-status and payload checks remain
-in place. A supplied null, empty or malformed ID is rejected; valid IDs retain
+accept authenticated requests with no `operationId`. Signature, timestamp,
+nonce, device-status and payload checks remain in place. A supplied null, empty or malformed ID is rejected; valid IDs retain
 the existing transactional replay handling.
 
 This exception does not cover unbinding, unsubscribing or access mutations. Old
 registrations do not get operation-level replay or ordering protection: a newly
-signed retry can register again. Remove `compatiblePushRegistration` and restore
-`reliableOperation` at both registration routes after clients update, alongside
-the planned removal of the call-event exception. There is no automatic deadline
-and no schema change.
-
-Validation: route tests cover absent and malformed IDs, payload validation,
-authentication middleware placement and the transactional path for new clients.
-These checks do not replace testing a released Android build against the candidate
-server; the extended system suite was not rerun for this adapter.
+signed retry can register again.

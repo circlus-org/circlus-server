@@ -1,21 +1,8 @@
 # WebSocket resource limits
 
-One resource guard covers every Circle and all four registration modes: local,
-external guest, call runtime and direct-file-transfer runtime. Existing signed
-registration formats and signaling messages do not change.
-
-Incoming messages are admitted before JSON parsing, database calls and the
-per-operation rate limiter. Each socket processes admitted messages in order.
-The message currently executing still consumes its queue budget. Closing a socket
-discards waiting work immediately; an already executing handler may finish its
-current operation and releases its accounting in `finally`. Closed sockets cannot
-register later, and cleanup runs again if an in-flight handler finishes after close.
-
-All `send`, `ping` and `pong` paths share outgoing budgets, including automatic
-ping replies. Accounting lasts until the underlying write callback completes,
-and also checks the socket's actual `bufferedAmount`. Counts and bytes are bounded
-separately, so many empty frames cannot bypass the byte limit. Outbound byte
-accounting includes a conservative 16-byte frame allowance.
+The limits below apply across all Circles and WebSocket registration modes.
+When a limit is reached, the server rejects a connection or closes the affected
+socket; it does not silently drop individual messages from an open connection.
 
 | Environment variable | Default | Meaning |
 |---|---:|---|
@@ -63,26 +50,7 @@ defaults are conservative starting limits, not a claim of capacity on a specific
 VPS. Tune against the smallest supported VPS and mobile reconnect/ICE bursts.
 Warnings use the `ws_resource_limit` event with reason and aggregate counters.
 
-Verification:
+## HTTP fallback
 
-```bash
-cd server
-npm run build
-npm test -- --runInBand
-npm run lint
-npm run test:ws-resources
-```
-
-Unit tests cover slow/failed handlers, FIFO order, socket close during queued work,
-byte/count/global admission limits, registration/upgrade deadlines, outgoing errors,
-control frames, accounting and trust-proxy behavior. The integration script uses
-real loopback WebSockets to test overload, registration deadline, reconnect/order,
-automatic pong and outgoing burst limits. It needs no application DB or external
-service and is included in exported CI. Real mobile calls through TURN still
-belong to the release acceptance test.
-
-## HTTP fallback and soft limit
-
-See [HTTP_SIGNALING.md](HTTP_SIGNALING.md) in the public docs for protocol 2,
-HTTP budgets, the soft WS threshold and client cooldown. In the source repository
-the document is named SERVER_HTTP_SIGNALING.md.
+[HTTP signaling](HTTP_SIGNALING.md) documents protocol 2, HTTP resource limits,
+and the WebSocket handover policy.

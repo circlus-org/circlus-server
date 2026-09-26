@@ -1,9 +1,7 @@
-# Server capabilities contract
+# Server capabilities endpoint
 
-Last updated: **August 2026**.
-
-This document defines the compatibility contract between independently updated
-clients and self-hosted Circlus servers. The normative endpoint is:
+This document describes the compatibility information a self-hosted Circlus
+server provides to Circlus clients. The endpoint is:
 
 ```http
 GET /api/config/capabilities
@@ -68,21 +66,6 @@ message. On shared origins the same value is sent as
 `X-Circlus-Circle-ID`; WebSocket handshakes use the `circleId` query parameter.
 The server rejects a selector that does not match the signed destination.
 
-## Pre-public routing metadata migration
-
-Deploy the server migration before the coordinated client update. The server
-preserves the `circleId` from the latest signed membership state, or generates
-one for a Circle that has no membership state yet. A client profile stored in
-the former `serverId`/`serverUrl` format performs one unselected capabilities
-request to its formerly unique origin, then persists the returned `circleId`,
-`vpsId`, and normalized `serverOrigin`. This applies to member, owner, direct
-guest, and temporary-access profiles.
-
-Do not create a second Circle on an existing origin until clients using that
-origin have completed this discovery. An unresolved legacy profile is retained
-locally and retried on a later application start; `circleId` is never invented
-from the domain and signed requests are not downgraded to an unscoped format.
-
 ## `apiLevel`
 
 `apiLevel` is a positive integer that identifies a cumulative level of the
@@ -90,7 +73,6 @@ public server API.
 
 Rules:
 
-- the first public server release has `apiLevel: 1`;
 - level `N` includes every capability from levels `1..N`;
 - a published level must never be reused with a different meaning;
 - later releases must not decrease the level;
@@ -133,62 +115,17 @@ authorization.
 
 ## Client algorithm
 
-Each client maintains the minimum API level for every capability it knows:
+For a feature that needs API level `N`, the client enables it only when:
 
 ```ts
-const FEATURE_API_LEVEL = {
-  directGuestLinks: 1,
-  domainMigrationNotice: 1,
-  memberRemoval: 2
-};
+capabilities.apiLevel >= N && capabilities.enabled?.[feature] !== false
 ```
 
-A capability is available only when both conditions are true:
-
-```ts
-capabilities.apiLevel >= FEATURE_API_LEVEL[feature]
-  && capabilities.enabled?.[feature] !== false
-```
-
-Behavior matrix:
-
-| Server level | Required level | Runtime override | Available |
-|---:|---:|---|---|
-| 1 | 1 | missing | yes |
-| 1 | 1 | `false` | no |
-| 1 | 2 | missing | no |
-| 1 | 2 | `true` | no |
-| 2 | 2 | missing | yes |
+An `enabled: true` override does not make an unsupported feature available.
 
 If the endpoint is unavailable or the response does not contain a valid
 `apiLevel`, the client must not use capabilities that require a capability
 check. A capabilities error must never optimistically enable a feature.
-
-The initial public release contains the server implementation only. Publication
-of the official client source is planned separately. Until then, this document
-is the complete normative client-side algorithm; compatible third-party clients
-can implement it without access to the official client source.
-
-## Adding a capability
-
-Suppose message reactions are added after the first public release.
-
-1. Add the stable name `messageReactions` to `ServerFeatureKey`.
-2. Increase `SERVER_API_LEVEL` from `1` to `2` in the server release that first
-   provides the reactions API.
-3. Add `messageReactions: 2` to the capability-level table in each client that
-   uses the feature.
-4. Check availability before displaying its UI or making the first request to
-   the new endpoint.
-5. Do not change the levels assigned to previously published capabilities.
-6. Add tests for the new level and for the `enabled: false` override.
-
-An older client does not know `messageReactions` and continues to work as
-before. A newer client connected to a level 1 server receives `false` from its
-capability check and does not call an endpoint that the server lacks.
-
-Do not change the meaning of an existing capability incompatibly. Introduce a
-new capability name and API level, or publish a new endpoint/protocol version.
 
 ## `limits`
 
@@ -196,8 +133,8 @@ new capability name and API level, or publish a new endpoint/protocol version.
 display or validation before a user action. A value in `limits` does not prove
 that the corresponding feature is supported; `apiLevel` determines support.
 
-The current contract retains values already used for messages, attachments,
-and guest links. `null` means that the Circle has no configured limit; it does
+The response includes effective values for messages, attachments, and guest
+links. `null` means that the Circle has no configured limit; it does
 not guarantee that the server has no transport or physical constraint.
 
 Do not expose every internal implementation limit through capabilities. For

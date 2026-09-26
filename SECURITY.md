@@ -11,7 +11,7 @@ Please report suspected vulnerabilities privately instead of opening a public is
 Use one of these channels:
 
 - GitHub Security Advisories for the public repository, if available.
-- A private message to the maintainer through the GitHub profile listed in `package.json`.
+- A private message to the maintainer through the [Circlus contact link](https://circlus.org/#contact).
 
 Include:
 
@@ -59,20 +59,12 @@ their own controls: for example, Inspector request polling requires the request
 token, and session reads require the approved session token. The server grants
 access to neither endpoint on the strength of the origin alone.
 
-## Secrets
+## Deployment Secrets
 
-Use unique random values for:
-
-- `POSTGRES_PASSWORD`
-- `PUSH_SERVICE_SHARED_SECRET`
-- `ICE_CONFIG_SHARED_SECRET`
-- `MOBILE_CALL_ACTION_SECRET`, if set
-
-Example:
-
-```bash
-openssl rand -base64 32
-```
+For the documented Docker Compose setup, `deploy/init-local-turn.sh` creates
+the database password and service secrets. Keep `deploy/.env` and
+`deploy/secrets/` private and include them in backups. If you configure
+additional secrets yourself, use unique random values for each one.
 
 ## ICE/TURN Secrets
 
@@ -80,6 +72,5 @@ The main Circlus server should not store coturn `static-auth-secret` values.
 Those belong in the ICE config service, which returns short-lived TURN
 credentials to the main server after a signed server-to-server request.
 
-`ICE_CONFIG_SERVER_ID` identifies the family server instance to the ICE config
-service. It is not a circle id and should not be used as the future key for
-per-circle TURN routing.
+`ICE_CONFIG_SERVER_ID` identifies this Circlus Server to the ICE config
+service. It defaults to `VPS_ID` and is not a Circle identifier.
