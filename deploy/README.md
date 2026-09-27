@@ -21,6 +21,16 @@ native incoming-call actions and bootstrap tokens. Existing values, secrets,
 and ICE configuration are preserved. Keep `deploy/.env` and the secret files
 when updating this installation.
 
+The initializer sets `turn-local.secret` to mode `640`, preserves its owner and
+group, and writes the numeric group to `TURN_SECRET_GID` in `deploy/.env`.
+Compose gives coturn this supplementary group while retaining the image's
+non-root user. Other secrets remain private to their owner. Run initialization
+with the account that owns the deployment files (root if originally installed
+as root). Re-running it repairs permissions without replacing credentials.
+`TURN_LOCAL_SECRET_FILE`, if set, selects the coturn secret whose permissions
+are repaired; relative paths are resolved from the repository root. A custom
+secret must also match the cluster secret configured for the ICE service.
+
 ## Host ports
 
 Check for existing listeners before starting Compose:
@@ -47,6 +57,150 @@ not configure TURN/TLS.
 
 The installation command in the root README starts PostgreSQL, the API,
 ICE Config Service, and local coturn.
+
+## Firewall configuration
+
+Allow these inbound ports on **both the host firewall and the hosting provider's
+firewall/security group**:
+
+| Setting | Default | Protocol |
+| --- | --- | --- |
+| HTTPS setup | 80, 443 | TCP |
+| `TURN_LISTEN_PORT` | 3478 | TCP and UDP |
+| `TURN_RELAY_MIN_PORT`–`TURN_RELAY_MAX_PORT` | 49160–49200 | UDP |
+
+For an already active UFW and default TURN ports:
+
+```bash
+sudo ufw allow 3478/tcp
+sudo ufw allow 3478/udp
+sudo ufw allow 49160:49200/udp
+sudo ufw status verbose
+```
+
+Use the actual ports from `deploy/.env`; the initializer prints matching UFW
+commands after each run. It does not enable, disable or modify any firewall.
+If UFW is inactive, check the firewall actually used by your host. Preserve
+existing SSH/HTTPS access. Provider firewall rules must be configured separately.
+Coturn uses `network_mode: host`, so there is no Docker port-publication rule
+that opens these ports for you. The Nginx HTTPS setup does not open TURN ports.
+
+## TURN verification and troubleshooting
+
+Verify in this order:
+
+```bash
+docker compose --env-file deploy/.env --profile local-turn ps -a
+docker compose --env-file deploy/.env --profile local-turn logs --tail=100 coturn ice-config-service
+sudo ss -lntup | grep ':3478'
+```
+
+Replace `3478` if configured differently. Coturn should listen on a public
+interface over both TCP and UDP. `TURN_PUBLIC_HOST` and the URLs in
+`deploy/ice/turn-clusters.json` must resolve to the correct server. Behind 1:1
+NAT, configure `TURN_EXTERNAL_IP`. Initialization preserves existing ICE JSON:
+changing the hostname or port in `.env` alone does not update those URLs.
+
+Check secret loading without displaying it:
+
+```bash
+docker compose --env-file deploy/.env --profile local-turn exec -T coturn sh -c '
+  test -r /run/secrets/turn_local &&
+  grep -q "^static-auth-secret=." /tmp/turnserver.conf &&
+  echo "TURN secret: OK"
+'
+```
+
+Container health checks local STUN liveness and secret/config availability.
+`node deploy/smoke-test-ice.mjs` checks only credential issuance. Neither checks
+authenticated TURN relaying or public reachability.
+
+With Node.js 24+ on the VPS, run from the repository root:
+
+```bash
+node deploy/smoke-test-turn.mjs
+```
+
+This reads `deploy/.env`, requests temporary credentials from the ICE API and
+uses `turnutils_uclient` inside coturn to authenticate and exchange packets for
+every returned TURN URL (UDP and TCP in the standard setup). It fails on
+errors, timeouts, missing statistics or lost packets. It does not print the
+credentials. `CIRCLUS_ENV_FILE` selects another env file; use the original
+`COMPOSE_PROJECT_NAME` if the installation uses a custom project name.
+
+A successful local test does not verify the host/provider firewall from outside.
+To test from another network, first export **temporary** credentials on the VPS:
+
+```bash
+node deploy/smoke-test-turn.mjs --write-credentials /tmp/circlus-turn-check.json
+```
+
+The file is created with mode `600`, is never overwritten, and contains only
+expiring client credentials and TURN addresses, not the shared server secret.
+Copy it privately to a separate Linux machine with this repository, Node.js 24+
+and `turnutils_uclient` (from the `coturn` package). On that external machine:
+
+```bash
+TURN_SMOKE_CLIENT=turnutils_uclient node deploy/smoke-test-turn.mjs \
+  --credentials /tmp/circlus-turn-check.json
+```
+
+The printed expiration time limits how long the file works. Remove the temporary
+file on both machines afterwards. Never copy `deploy/secrets/` for this test.
+This test exercises two relay allocations on the same TURN server; it does not
+exhaustively test reachability of relay ports from every possible peer/network.
+Finally, make a new browser call with **Always TURN** enabled between devices
+on different networks. Check for `relay` candidates and audio in both directions,
+then restore your preferred setting.
+
+| Symptom | Next check |
+| --- | --- |
+| `Permission denied` reading `turn_local` | Run the initializer and recreate coturn as described below. |
+| `healthy`, but no relay candidates | Check public TCP/UDP access and run the authenticated test. |
+| Listener exists, external requests time out | Check host and provider firewalls, DNS and NAT. |
+| Authentication never succeeds | Check that ICE and coturn use the same secret, that credentials have not expired, and the server clock. An initial TURN 401 challenge alone is normal. |
+| Allocation succeeds, but packets/audio do not flow | Check relay UDP range, advertised relay address/NAT and the other peer. |
+
+If needed, run `sudo timeout 30 tcpdump -ni any 'port 3478'` during a fresh
+external attempt. No arriving packets points to the client/network path before
+the host capture; arriving requests require examining the replies and firewall
+rules. Do not publish `.env`, secret files or temporary credentials in reports.
+
+## Upgrading an existing TURN installation
+
+After obtaining the updated code, run from the installation directory:
+
+```bash
+./deploy/init-local-turn.sh
+docker compose --env-file deploy/.env --profile local-turn up -d --force-recreate coturn
+```
+
+Use the original installation account and Compose project name. The initializer
+preserves the secret and ICE configuration, repairs its permissions, and records
+its group for Compose. Recreating coturn applies the supplementary group;
+`docker compose restart` alone cannot apply it. No manual `chmod 644`, secret
+rotation or root coturn process is required. The new startup script refuses to
+run if the secret cannot be read or is empty.
+
+Apply the firewall rules above as well: fixing secret permissions does not open
+ports. Repeat the authenticated test and an external Always TURN call. Existing
+calls using this coturn instance can be interrupted during recreation.
+
+## Deployment regression tests
+
+With Linux, Docker Compose, Python 3, Node.js 24+ and OpenSSL installed:
+
+```bash
+python3 deploy/test-local-turn.py
+```
+
+The test uses a temporary installation and separate Compose project. It covers
+initialization/reinitialization, ordinary-user and root-created secrets,
+startup rejection for unreadable/empty secrets, UDP/TCP relay exchanges with
+ICE-issued credentials, and rejection of invalid credentials or incomplete
+packet exchanges. The public export CI runs this test. It does not modify the
+production deployment or firewall and does not replace external reachability
+testing.
 
 ## HTTPS with Nginx and Certbot
 

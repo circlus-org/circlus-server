@@ -103,6 +103,10 @@ services:
 
   coturn:
     image: coturn/coturn:4.15.0-r0
+    # Keep the image's non-root user; the initializer sets the secret file group.
+    # Default to the image group so external-TURN deployments need no local GID.
+    group_add:
+      - "${TURN_SECRET_GID:-65534}"
     profiles: [local-turn]
     init: true
     restart: unless-stopped
@@ -120,7 +124,8 @@ services:
     secrets:
       - turn_local
     healthcheck:
-      test: ["CMD-SHELL", "turnutils_stunclient -p ${TURN_LISTEN_PORT:-3478} 127.0.0.1 >/dev/null 2>&1"]
+      # Local liveness only; smoke-test-turn.mjs checks authenticated relay traffic.
+      test: ["CMD-SHELL", "test -r /run/secrets/turn_local && grep -q '^static-auth-secret=.' /tmp/turnserver.conf && turnutils_stunclient -p ${TURN_LISTEN_PORT:-3478} 127.0.0.1 >/dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 5

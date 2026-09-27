@@ -1,10 +1,9 @@
 fingerprint
 use-auth-secret
-no-cli
+# CLI and loopback peers are disabled by default in the pinned coturn image.
 no-tls
 no-dtls
 no-multicast-peers
-no-loopback-peers
 stale-nonce=600
 log-file=stdout
 simple-log

@@ -3,6 +3,7 @@ import { pool, query } from '../index';
 import { getCallRuntimeConfig } from '../../config/serverRuntimeConfig';
 import {
   deriveCallHistoryFinalReason,
+  deriveCallHistoryEndedAt,
   deriveCallHistoryFinalStatus,
   isCallRejectionReason,
   type CallHistoryServerStatus
@@ -249,9 +250,11 @@ export class CallHistoryRepository {
     const existing = await this.findByCallSessionId(params.familyId, params.callSessionId);
     if (!existing) return;
     const endedAt = Math.max(0, Math.floor(params.endedAt));
-    const nextEndedAt = existing.ended_at === null
-      ? endedAt
-      : Math.min(existing.ended_at, endedAt);
+    const nextEndedAt = deriveCallHistoryEndedAt({
+      existingEndedAt: existing.ended_at,
+      existingReason: existing.final_reason,
+      reportedEndedAt: endedAt
+    });
     const nextStatus = deriveCallHistoryFinalStatus({
       existingStatus: existing.final_status,
       reportedStatus: params.finalStatus,

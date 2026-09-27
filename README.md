@@ -51,10 +51,28 @@ and backups.
    ```
 
    The initializer creates a stable `VPS_ID`, database password, ICE/TURN
-   configuration, and secret files. Keep `deploy/.env`, `deploy/secrets/`, and
+   configuration, and secret files. It sets the TURN secret to mode `640` and
+   records its group as `TURN_SECRET_GID`, which Compose grants to the non-root
+   coturn process. Keep `deploy/.env`, `deploy/secrets/`, and
    `deploy/ice/turn-clusters.json` when updating or restoring the server.
 
-3. Install Nginx and Certbot, then set up HTTPS for the Circle domain:
+3. Allow the TURN ports in **both the VPS firewall and the hosting provider's
+   firewall/security group**. For the default ports and an already active UFW:
+
+   ```bash
+   sudo ufw allow 3478/tcp
+   sudo ufw allow 3478/udp
+   sudo ufw allow 49160:49200/udp
+   sudo ufw status verbose
+   ```
+
+   Also allow TCP 80/443 for HTTPS. If you changed TURN ports, use the commands
+   printed by `init-local-turn.sh`. The initializer does not change firewall
+   rules. Configuring Nginx/HTTPS alone does not open TURN, which uses the host
+   network directly. If UFW is inactive, check your actual firewall instead;
+   these instructions do not require enabling UFW.
+
+4. Install Nginx and Certbot, then set up HTTPS for the Circle domain:
 
    ```bash
    sudo apt update
@@ -68,17 +86,31 @@ and backups.
    JSON with `"status":"ok"`. If you already manage Nginx, see the
    [included proxy example](deploy/nginx/circlus-server.conf.example).
 
-4. Create a one-time server administrator claim token:
+5. Create a one-time server administrator claim token:
 
    ```bash
    docker compose --env-file deploy/.env exec -e LOG_LEVEL=warn server \
      npm run server-admin:create-claim:prod -- --ttl-hours=1
    ```
 
-5. Open the [Circlus web client](https://web.circlus.org). On the start screen,
+6. Open the [Circlus web client](https://web.circlus.org). On the start screen,
    choose **Create a Circle on your own server**. Enter the HTTPS server URL and
    the claim token. If you already have a profile, use **Settings → Server
    Management → Connect a new server** instead.
+
+7. Verify calls with **Always TURN** enabled in the web client, preferably
+   between devices on different networks. Confirm `relay` candidates and audio
+   in both directions, then restore your preferred setting. A healthy container
+   or a successful HTTPS/ICE response does not prove TURN works. For an
+   automated authentication and packet-exchange check (Node.js 24+ on the VPS):
+
+   ```bash
+   node deploy/smoke-test-turn.mjs
+   ```
+
+   See [TURN verification and troubleshooting](deploy/README.md#turn-verification-and-troubleshooting)
+   for external tests and how to distinguish permission, authentication and
+   firewall failures.
 
 ### Push notifications
 
@@ -106,6 +138,10 @@ docker compose --env-file deploy/.env --profile local-turn up -d --build
 
 Keep the same Compose project name as the original installation. The
 `migrate` service applies pending database migrations before the server starts.
+The initializer also repairs TURN secret permissions without rotating the
+secret. Compose recreates coturn when its supplementary group changes; a plain
+`restart` does not apply a changed Compose configuration. For older installations,
+follow [the TURN upgrade instructions](deploy/README.md#upgrading-an-existing-turn-installation).
 
 ## Configuration and troubleshooting
 
@@ -117,7 +153,7 @@ host loopback ports 3000 and 3090 by default. PostgreSQL has no host port.
   `/ready` endpoint should return `"status":"ok"`.
 - **The client cannot connect:** check HTTPS and the server logs.
 - **Calls fail on some networks:** check the TURN host, firewall ports, and
-  [TURN ports](deploy/README.md#host-ports).
+  [TURN diagnostics](deploy/README.md#turn-verification-and-troubleshooting).
 - **Push does not arrive:** check the connection status in Server Management.
 - **Migration fails:** check PostgreSQL connectivity and whether an applied SQL
   migration was changed. Do not edit applied migrations.

@@ -18,7 +18,7 @@ import {
   listCallHistoryForActor,
   markMissedCallsSeenForActor
 } from '../services/callHistoryService';
-import { sendCallDeliveryStatusWs, sendToIdentityWs } from '../ws/wsGateway';
+import { declineCallViaMobileAction, sendCallDeliveryStatusWs, sendToIdentityWs } from '../ws/wsGateway';
 
 const router = Router();
 
@@ -110,7 +110,17 @@ router.post('/handling-event', verifySignature, requireActiveIdentity, reliableO
         reason: deliveryStatus.reason,
         occurredAt: deliveryStatus.occurredAt
       });
-      if (deliveryStatus.shouldEndCall) {
+      if (deliveryStatus.status === 'declined') {
+        // Android reports the user's decision before sending a separate decline.
+        // That command may be lost when the native screen hides the WebView.
+        // Use the normal decline path to stop ringing and notify both peers;
+        // it also ignores late reports for an accepted or already ended call.
+        await declineCallViaMobileAction({
+          familyId: actor.familyId,
+          callSessionId: deliveryStatus.callSessionId,
+          targetIdentityId: actor.identityId
+        });
+      } else if (deliveryStatus.shouldEndCall) {
         const endReason = deliveryStatus.status === 'busy'
           ? 'busy'
           : deliveryStatus.reason || deliveryStatus.status;

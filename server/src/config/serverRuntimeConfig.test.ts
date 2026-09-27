@@ -103,6 +103,7 @@ describe('server runtime config', () => {
       },
       calls: {
         ringTimeoutMs: 65_000,
+        signalingRecoveryGraceMs: 120_000,
         cancellationDeliveredGraceMs: 3_000,
         cancellationNoDeliveryFallbackMs: 10_000,
         pushRepeatIntervalMs: 5_000,
@@ -310,16 +311,21 @@ describe('server runtime config', () => {
   it('loads and bounds call, presence, and HTTP signaling settings', () => {
     expect(loadCallRuntimeConfig(environment({
       CALL_RING_TIMEOUT_MS: '70000',
+      CALL_SIGNALING_RECOVERY_GRACE_MS: '45000',
       CALL_SIGNALING_DIAGNOSTICS: 'true',
       HTTP_CALL_SIGNALING_MAX_QUEUE: '750'
     }))).toMatchObject({
       webSocket: { presenceTouchIntervalMs: 30_000 },
       calls: {
         ringTimeoutMs: 70_000,
+        signalingRecoveryGraceMs: 45_000,
         signalingDiagnostics: true,
         httpSignaling: { maxQueue: 750 }
       }
     });
+    expect(() => loadCallRuntimeConfig(environment({
+      CALL_SIGNALING_RECOVERY_GRACE_MS: '9999'
+    }))).toThrow('CALL_SIGNALING_RECOVERY_GRACE_MS must be between 10000 and 300000');
     expect(() => loadCallRuntimeConfig(environment({
       PRESENCE_WS_TOUCH_INTERVAL_MS: '1000'
     }))).toThrow('PRESENCE_WS_TOUCH_INTERVAL_MS must be between 15000 and 120000');

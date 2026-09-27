@@ -574,7 +574,7 @@ export async function sendCallStatusPush(
   params: {
     callSessionId: CallSessionId;
     callStatus: 'missed' | 'answered_elsewhere' | 'ended';
-    callEndReason?: 'cancelled' | 'timeout' | 'answered_elsewhere' | 'normal' | 'unknown';
+    callEndReason?: PushPayload['callEndReason'];
     fromIdentityId?: IdentityId;
     fromIdentityName?: string;
     isTemporaryLinkCall?: boolean;

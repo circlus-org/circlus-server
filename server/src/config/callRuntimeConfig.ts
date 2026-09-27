@@ -39,6 +39,7 @@ export type WebSocketRuntimeConfig = {
 
 export type CallRuntimeConfig = {
   ringTimeoutMs: number;
+  signalingRecoveryGraceMs: number;
   cancellationDeliveredGraceMs: number;
   cancellationNoDeliveryFallbackMs: number;
   pushRepeatIntervalMs: number;
@@ -117,6 +118,9 @@ export function loadCallRuntimeConfig(
       }
     },
     calls: {
+      signalingRecoveryGraceMs: integerSetting({
+        environment, key: 'CALL_SIGNALING_RECOVERY_GRACE_MS', defaultValue: 120_000, min: 10_000, max: 300_000
+      }),
       ringTimeoutMs: integerSetting({
         environment, key: 'CALL_RING_TIMEOUT_MS', defaultValue: 65_000, min: 1_000, max: 10 * 60 * 1000
       }),

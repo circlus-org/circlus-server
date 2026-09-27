@@ -1,8 +1,8 @@
 import { routeLogger } from '../utils/routeLogger';
 import { Router } from 'express';
-import { identityRepository } from '../db/repositories';
+import { directGuestRegistrationRepository, identityRepository } from '../db/repositories';
 import { query, transaction } from '../db';
-import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getSignedPayload } from '../middleware/auth';
+import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getRequestAuthorization, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import type { ApiResponse, CircleEncryptedIdentityStatus, ErrorCode, IdentityId } from '../../../shared/types';
 
@@ -105,7 +105,7 @@ router.post('/set', verifySignature, requireActiveIdentity, requireFullCircleIde
  * Get statuses for multiple identities
  * Used by client to fetch contact statuses
  */
-router.post('/get', verifySignature, requireActiveIdentity, requireFullCircleIdentity, async (req: AuthRequest<{ identityIds?: unknown[] }>, res) => {
+router.post('/get', verifySignature, requireActiveIdentity, async (req: AuthRequest<{ identityIds?: unknown[] }>, res) => {
   try {
     const { identityIds } = getSignedPayload<{ identityIds?: unknown[] }>(req);
     const familyId = req.familyId;
@@ -142,15 +142,29 @@ router.post('/get', verifySignature, requireActiveIdentity, requireFullCircleIde
     }
 
     // Get statuses
-    const normalizedIdentityIds = identityIds.map(String) as IdentityId[];
+    const fullCircleMember = getRequestAuthorization(req).fullCircleMember;
+    if (!fullCircleMember && req.identity?.role !== 'guest') {
+      return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Presence access denied' } } as ApiResponse);
+    }
+    let normalizedIdentityIds = [...new Set(identityIds.map(String))] as IdentityId[];
+    if (!fullCircleMember) {
+      // Guests may see only their registered peers, including guests they host.
+      // Filter mixed batches so an unrelated contact cannot block a valid peer.
+      const viewerIdentityId = req.device!.identityId;
+      const allowed = await Promise.all(normalizedIdentityIds.map(async (targetIdentityId) => (
+        targetIdentityId === viewerIdentityId
+        || Boolean(await directGuestRegistrationRepository.findActiveByPair(familyId, viewerIdentityId, targetIdentityId))
+      )));
+      normalizedIdentityIds = normalizedIdentityIds.filter((_, index) => allowed[index]);
+    }
     const [statusMap, encryptedRows] = await Promise.all([
       identityRepository.getStatuses(familyId, normalizedIdentityIds),
-      query<EncryptedStatusRow>(
+      fullCircleMember ? query<EncryptedStatusRow>(
         `SELECT owner_identity_id, epoch, revision, ciphertext, updated_at
            FROM circle_encrypted_identity_statuses
           WHERE family_id = $1 AND owner_identity_id = ANY($2::text[])`,
         [familyId, normalizedIdentityIds]
-      ),
+      ) : Promise.resolve({ rows: [] as EncryptedStatusRow[] }),
     ]);
     const encryptedByIdentity = new Map(encryptedRows.rows.map((row) => [row.owner_identity_id, mapEncryptedStatus(row)]));
 
@@ -168,7 +182,7 @@ router.post('/get', verifySignature, requireActiveIdentity, requireFullCircleIde
     for (const [identityId, statusData] of statusMap.entries()) {
       statuses[identityId] = {
         encryptedStatus: encryptedByIdentity.get(identityId) || null,
-        avatarBlobId: statusData.avatarBlobId,
+        avatarBlobId: fullCircleMember ? statusData.avatarBlobId : null,
         presence: {
           visibility: statusData.presenceVisible ? 'visible' : 'hidden',
           isOnline: statusData.isOnline,

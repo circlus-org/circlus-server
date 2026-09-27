@@ -6,6 +6,18 @@ export type CallHistoryServerStatus =
   | 'ended'
   | 'failed';
 
+/** A heartbeat sweep is an estimate, superseded by an explicit end report. */
+export function deriveCallHistoryEndedAt(params: {
+  existingEndedAt: number | null;
+  existingReason: string | null;
+  reportedEndedAt: number;
+}): number {
+  if (params.existingEndedAt === null || params.existingReason === 'heartbeat_timeout') {
+    return params.reportedEndedAt;
+  }
+  return Math.min(params.existingEndedAt, params.reportedEndedAt);
+}
+
 export function isCallRejectionReason(reason?: string | null): boolean {
   const normalized = String(reason || '').trim().toLowerCase();
   return normalized.includes('declin') || normalized.includes('reject');

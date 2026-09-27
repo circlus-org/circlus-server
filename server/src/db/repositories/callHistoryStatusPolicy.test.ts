@@ -1,5 +1,6 @@
 import {
   deriveCallHistoryFinalReason,
+  deriveCallHistoryEndedAt,
   deriveCallHistoryFinalStatus,
   isCallRejectionReason
 } from './callHistoryStatusPolicy';
@@ -73,5 +74,19 @@ describe('deriveCallHistoryFinalReason', () => {
       existingReason: 'timeout',
       reportedReason: 'declined'
     })).toBe('declined');
+  });
+});
+
+describe('deriveCallHistoryEndedAt', () => {
+  it('replaces a heartbeat estimate with the later explicit termination', () => {
+    expect(deriveCallHistoryEndedAt({ existingEndedAt: 1790448664340,
+      existingReason: 'heartbeat_timeout', reportedEndedAt: 1790448943809 })).toBe(1790448943809);
+  });
+  it.each(['signaling_disconnected', 'normal', null])('keeps the earliest explicit end for %s', existingReason => {
+    expect(deriveCallHistoryEndedAt({ existingEndedAt: 1000, existingReason, reportedEndedAt: 2000 })).toBe(1000);
+  });
+  it('accepts an earlier explicit report and a first report', () => {
+    expect(deriveCallHistoryEndedAt({ existingEndedAt: 2000, existingReason: 'normal', reportedEndedAt: 1000 })).toBe(1000);
+    expect(deriveCallHistoryEndedAt({ existingEndedAt: null, existingReason: null, reportedEndedAt: 1000 })).toBe(1000);
   });
 });

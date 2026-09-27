@@ -1,4 +1,5 @@
 import type { WebSocket } from 'ws';
+import { loadCallRuntimeConfig } from '../config/callRuntimeConfig';
 import { CallSessionRoutingRegistry } from './callSessionRoutingRegistry';
 import { CallSignalingRecovery } from './callSignalingRecovery';
 import type { ConnectionInfo } from '../ws/wsConnectionContext';
@@ -18,7 +19,7 @@ const info: ConnectionInfo = {
   }
 };
 
-function harness() {
+function harness(graceMs = 10_000) {
   const routes = new CallSessionRoutingRegistry();
   routes.registerInitiator({ callSessionId: 'call-1', familyId: 'circle',
     initiatorIdentityId: 'guest', initiatorWs: caller, targetIdentityId: 'receiver' });
@@ -26,7 +27,7 @@ function harness() {
     ws: receiver, deviceId: 'browser' });
   const send = jest.fn();
   const expire = jest.fn(async () => {});
-  const recovery = new CallSignalingRecovery({ routes, send, expire, log: jest.fn(), graceMs: 10_000 });
+  const recovery = new CallSignalingRecovery({ routes, send, expire, log: jest.fn(), graceMs });
   return { routes, send, expire, recovery };
 }
 
@@ -46,6 +47,30 @@ describe('call signaling recovery after acceptance', () => {
     recovery.closed(caller, info);
     await jest.advanceTimersByTimeAsync(10_000);
     expect(expire).not.toHaveBeenCalled();
+  });
+
+  it('allows the same native callee to recover after 23 seconds with the configured default', async () => {
+    const graceMs = loadCallRuntimeConfig({}).calls.signalingRecoveryGraceMs;
+    const { recovery, routes, expire } = harness(graceMs);
+    const nativeInfo: ConnectionInfo = { actorType: 'local', familyId: 'circle',
+      identityId: 'receiver', deviceId: 'phone', runtimeMode: 'video-native', scopedCallSessionId: 'call-1' };
+    recovery.closed(receiver, nativeInfo);
+    await jest.advanceTimersByTimeAsync(23_000);
+    expect(expire).not.toHaveBeenCalled();
+    expect(recovery.resume(replacement, nativeInfo, 'call-1')).toBe(true);
+    expect(routes.resolvePeerSocket('call-1', 'guest')).toBe(replacement);
+    await jest.advanceTimersByTimeAsync(graceMs);
+    expect(expire).not.toHaveBeenCalled();
+  });
+
+  it('still expires an abandoned call at the configured default deadline', async () => {
+    const graceMs = loadCallRuntimeConfig({}).calls.signalingRecoveryGraceMs;
+    const { recovery, expire } = harness(graceMs);
+    recovery.closed(caller, info);
+    await jest.advanceTimersByTimeAsync(graceMs - 1);
+    expect(expire).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(expire).toHaveBeenCalledTimes(1);
   });
 
   it('ends the orphaned call after the grace period instead of leaving the browser busy', async () => {

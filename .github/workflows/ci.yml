@@ -95,23 +95,6 @@ jobs:
       - name: Build ICE Config Service container
         run: docker build --tag circlus-ice-config-service-ci ice_config_service
 
-      - name: Validate Docker Compose and ICE credential issuance
-        run: |
-          cp deploy/.env.example deploy/.env
-          sed -i 's/^TURN_PUBLIC_HOST=$/TURN_PUBLIC_HOST=turn.test.example/' deploy/.env
-          ./deploy/init-local-turn.sh
-          grep -Eq '^MOBILE_CALL_ACTION_SECRET=.{32,}$' deploy/.env
-          docker compose --env-file deploy/.env --profile local-turn config --quiet
-          set -a
-          . ./deploy/.env
-          set +a
-          trap 'docker compose --env-file deploy/.env down' EXIT
-          docker compose --env-file deploy/.env up -d --build --wait ice-config-service
-          if ! node deploy/smoke-test-ice.mjs; then
-            docker compose --env-file deploy/.env logs ice-config-service
-            exit 1
-          fi
-          if ! ICE_SMOKE_TURN_CLUSTER_ID= node deploy/smoke-test-ice.mjs; then
-            docker compose --env-file deploy/.env logs ice-config-service
-            exit 1
-          fi
+      - name: Test local TURN installation, permissions and authenticated relay traffic
+        run: python3 deploy/test-local-turn.py
+

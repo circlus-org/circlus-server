@@ -684,7 +684,7 @@ callSignalingRecovery = new CallSignalingRecovery({
   expire: (callSessionId, route, reason) => reason === 'superseded_by_redial'
     ? callTerminationWsHandlers.terminateForSupersededRedial(callSessionId, route)
     : callTerminationWsHandlers.terminateForSignalingTimeout(callSessionId, route),
-  graceMs: 10_000,
+  graceMs: callRuntimeConfig.calls.signalingRecoveryGraceMs,
   log: (event, details) => logger.warn(event, details)
 });
 
@@ -944,27 +944,32 @@ export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
 /**
  * Handle WebSocket close
  */
-export function handleClose(ws: WebSocket) {
+export function handleClose(ws: WebSocket, details: { code?: number; hasReason?: boolean } = {}) {
   const info = connectionRegistry.getInfo(ws);
   directFileTransferSignaling.handleSocketClosed(ws);
   wsRateLimiter.remove(ws);
 
-  if (info) {
-    callSignalingRecovery.closed(ws, info);
-
-    logger.info('ws_connection_closed', {
-      familyId: info.familyId,
-      identityId: info.identityId,
-      deviceId: info.deviceId,
-      actorType: info.actorType
-    });
-  }
+  if (info) callSignalingRecovery.closed(ws, info);
+  logger.info('ws_connection_closed', {
+    ...details,
+    ...describeSocket(ws),
+    callSessionIds: callSessionRouting.routesForSocket(ws).map(route => route.callSessionId),
+    familyId: info?.familyId
+  });
   connectionRegistry.remove(ws);
 }
 
-/**
- * Get active connections count (for monitoring)
- */
+/** Log server-initiated termination before the socket loses its call context. */
+export function logHeartbeatTimeout(ws: WebSocket): void {
+  logger.warn('ws_heartbeat_timeout', {
+    ...describeSocket(ws),
+    familyId: connectionRegistry.getInfo(ws)?.familyId,
+    callSessionIds: callSessionRouting.routesForSocket(ws).map(route => route.callSessionId),
+    heartbeatIntervalMs: callRuntimeConfig.webSocket.heartbeatIntervalMs
+  });
+}
+
+/** Get active connections count (for monitoring). */
 export function getActiveConnectionsCount(): number {
   return connectionRegistry.getActiveCount();
 }

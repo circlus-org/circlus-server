@@ -19,9 +19,14 @@ jest.mock('../services/callHistoryService', () => ({
   listCallHistoryForActor: jest.fn(),
   markMissedCallsSeenForActor: jest.fn()
 }));
-jest.mock('../ws/wsGateway', () => ({ sendCallDeliveryStatusWs: jest.fn(), sendToIdentityWs: jest.fn() }));
+jest.mock('../ws/wsGateway', () => ({
+  sendCallDeliveryStatusWs: jest.fn(),
+  sendToIdentityWs: jest.fn(),
+  declineCallViaMobileAction: jest.fn(async () => ({ status: 'declined' }))
+}));
 
 import router from './calls';
+import { declineCallViaMobileAction, sendCallDeliveryStatusWs } from '../ws/wsGateway';
 import { transaction } from '../db';
 import { recordCallHandlingEventForActor } from '../services/callLifecycleService';
 import { verifySignature, requireActiveIdentity } from '../middleware/auth';
@@ -73,4 +78,33 @@ describe('reliable call handling events', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(recordCallHandlingEventForActor).toHaveBeenCalledTimes(1);
   });
+
+  test.each(['incoming_ui', 'notification_action', 'locally_declined'])(
+    'finishes a reported decline from %s even without a separate decline command',
+    async (reason) => {
+      jest.mocked(recordCallHandlingEventForActor).mockResolvedValue({
+        callerIdentityId: 'caller', callSessionId: 'call', status: 'declined',
+        reason, occurredAt: 123, shouldEndCall: false
+      });
+      const operationId = Date.now().toString(16).padStart(16, '0') + '-' + 'b'.repeat(64);
+      expect((await invoke({ operationId })).statusCode).toBe(200);
+      expect(declineCallViaMobileAction).toHaveBeenCalledWith({
+        familyId: 'f', callSessionId: 'call', targetIdentityId: 'callee'
+      });
+      expect(sendCallDeliveryStatusWs).toHaveBeenCalledWith(expect.objectContaining({ status: 'declined' }));
+    }
+  );
+
+  test.each(['ringing', 'answered', 'busy', 'failed'] as const)(
+    'does not turn a %s report into a decline',
+    async (status) => {
+      jest.mocked(recordCallHandlingEventForActor).mockResolvedValue({
+        callerIdentityId: 'caller', callSessionId: 'call', status, occurredAt: 123
+      });
+      const operationId = Date.now().toString(16).padStart(16, '0') + '-' + 'c'.repeat(64);
+      expect((await invoke({ operationId })).statusCode).toBe(200);
+      expect(declineCallViaMobileAction).not.toHaveBeenCalled();
+    }
+  );
+
 });

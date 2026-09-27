@@ -108,6 +108,21 @@ generate_secret_if_missing "$secrets_dir/ice-subject-id.secret"
 generate_secret_if_missing "$secrets_dir/turn-local.secret"
 generate_secret_if_missing "$secrets_dir/push-config-encryption.secret"
 
+# Compose file-backed secrets keep host ownership and mode. Grant coturn the
+# file's group instead of running it as root or exposing the secret to everyone.
+turn_secret_file="${TURN_LOCAL_SECRET_FILE:-$secrets_dir/turn-local.secret}"
+case "$turn_secret_file" in
+  /*) ;;
+  *) turn_secret_file="$repo_dir/$turn_secret_file" ;;
+esac
+if [ ! -f "$turn_secret_file" ] || [ ! -s "$turn_secret_file" ] || [ ! -r "$turn_secret_file" ]; then
+  echo "TURN secret must be a readable, nonempty file: $turn_secret_file" >&2
+  exit 1
+fi
+turn_secret_gid=$(stat -c '%g' "$turn_secret_file")
+chmod 640 "$turn_secret_file"
+persist_env_value TURN_SECRET_GID "$turn_secret_gid"
+
 if [ -e "$config_file" ]; then
   echo "configuration already exists, leaving it unchanged: $config_file"
 else
@@ -123,3 +138,9 @@ fi
 
 echo "local ICE/TURN secrets are ready in: $secrets_dir"
 echo "validate with: docker compose --env-file deploy/.env --profile local-turn config"
+echo "Allow inbound TCP and UDP $turn_listen_port and UDP ${TURN_RELAY_MIN_PORT:-49160}-${TURN_RELAY_MAX_PORT:-49200} in both the host and hosting-provider firewalls."
+echo "For an active UFW firewall:"
+echo "  sudo ufw allow $turn_listen_port/tcp"
+echo "  sudo ufw allow $turn_listen_port/udp"
+echo "  sudo ufw allow ${TURN_RELAY_MIN_PORT:-49160}:${TURN_RELAY_MAX_PORT:-49200}/udp"
+echo "Firewall rules have not been changed. After startup, run: node deploy/smoke-test-turn.mjs"

@@ -105,7 +105,7 @@ export class CallTerminationWsHandlers {
       persistAndClearCallIceStats({ familyId, callSessionId }),
       ...[route.initiatorIdentityId, route.targetIdentityId].map(targetIdentityId =>
         sendCallStatusPush(familyId, targetIdentityId, {
-          callSessionId, callStatus: 'ended', callEndReason: 'normal',
+          callSessionId, callStatus: 'ended', callEndReason: reason,
           fromIdentityId: targetIdentityId === route.initiatorIdentityId
             ? route.targetIdentityId : route.initiatorIdentityId
         }).catch(error => this.logger.warn('call_signaling_termination_push_failed', { callSessionId, reason, error }))

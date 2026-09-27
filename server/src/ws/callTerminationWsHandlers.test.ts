@@ -106,6 +106,9 @@ describe('call termination WebSocket handlers', () => {
     expect(callHistoryRepository.markFinalized).toHaveBeenCalledWith(expect.objectContaining({
       callSessionId: 'call-1', finalStatus: 'failed', reason: 'signaling_disconnected'
     }));
+    expect(sendCallStatusPush).toHaveBeenCalledWith('family-1', calleeIdentityId, expect.objectContaining({
+      callStatus: 'ended', callEndReason: 'signaling_disconnected'
+    }));
     expect(persistAndClearCallIceStats).toHaveBeenCalledWith({ familyId: 'family-1', callSessionId: 'call-1' });
   });
 

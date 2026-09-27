@@ -48,7 +48,7 @@ import circleMigrationRoutes from './routes/circleMigration';
 import serverAdminMigrationSlotsRoutes from './routes/serverAdminMigrationSlots';
 import circleMigrationAdminRoutes from './routes/circleMigrationAdmin';
 import { initializeDatabase, closeDatabase, acquireServerProcessLock, getPool } from './db';
-import { handleMessage, handleClose, setSocketFamilyContext, stopCallRingingTimers, isSocketInRealtimeSession } from './ws/callHandler';
+import { handleMessage, handleClose, logHeartbeatTimeout, setSocketFamilyContext, stopCallRingingTimers, isSocketInRealtimeSession } from './ws/callHandler';
 import { startCallHistoryHeartbeatCleanupScheduler, startCleanupScheduler, startExpiredInviteCleanupScheduler, type StopScheduler } from './utils/cleanup';
 import { tenancyMiddleware, getRequestHost, getRequestedCircleId, resolveCircleContextFromHost } from './middleware/tenancy';
 import { createRateLimiter, ipKey } from './middleware/rateLimit';
@@ -322,9 +322,8 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', (code, reason) => {
-    handleClose(ws);
     const reasonText = reason ? reason.toString() : '';
-    logger.info('ws_connection_closed', { code, hasReason: reasonText.length > 0 });
+    handleClose(ws, { code, hasReason: reasonText.length > 0 });
   });
 });
 
@@ -358,6 +357,7 @@ async function processWsMessage(ws: WebSocket, data: WebSocket.RawData): Promise
 const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if ((ws as any).isAlive === false) {
+      logHeartbeatTimeout(ws);
       return ws.terminate();
     }
 
