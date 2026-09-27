@@ -51,7 +51,6 @@ async function main() {
     console.log(`PASS: ${counters[2]}/${counters[1]} messages received.`);
   }
   console.log('TURN authentication and relay exchange passed from this test location.');
-  console.log('Also test from an external network and make an Always TURN call; local success does not verify public firewall rules.');
 }
 main().catch(error => {
   console.error(`TURN smoke test failed: ${error.message}`);

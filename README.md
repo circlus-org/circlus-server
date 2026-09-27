@@ -66,10 +66,10 @@ and backups.
    sudo ufw status verbose
    ```
 
-   Also allow TCP 80/443 for HTTPS. If you changed TURN ports, use the commands
-   printed by `init-local-turn.sh`. The initializer does not change firewall
-   rules. Configuring Nginx/HTTPS alone does not open TURN, which uses the host
-   network directly. If UFW is inactive, check your actual firewall instead;
+   Also allow TCP 80/443 for HTTPS. If you changed TURN ports, replace the
+   values above with those from `deploy/.env`. The initializer does not change
+   firewall rules. Configuring Nginx/HTTPS alone does not open TURN, which uses
+   the host network directly. If UFW is inactive, check your actual firewall instead;
    these instructions do not require enabling UFW.
 
 4. Install Nginx and Certbot, then set up HTTPS for the Circle domain:
@@ -98,19 +98,17 @@ and backups.
    the claim token. If you already have a profile, use **Settings → Server
    Management → Connect a new server** instead.
 
-7. Verify calls with **Always TURN** enabled in the web client, preferably
-   between devices on different networks. Confirm `relay` candidates and audio
-   in both directions, then restore your preferred setting. A healthy container
-   or a successful HTTPS/ICE response does not prove TURN works. For an
-   automated authentication and packet-exchange check (Node.js 24+ on the VPS):
+7. Make a test call between devices on different networks and check audio in
+   both directions. You can also check TURN authentication and packet exchange
+   from the VPS (requires Node.js 24+):
 
    ```bash
    node deploy/smoke-test-turn.mjs
    ```
 
-   See [TURN verification and troubleshooting](deploy/README.md#turn-verification-and-troubleshooting)
-   for external tests and how to distinguish permission, authentication and
-   firewall failures.
+   This automated check runs from the VPS. See
+   [TURN verification and troubleshooting](deploy/README.md#turn-verification-and-troubleshooting)
+   for checking external connectivity and diagnosing failures.
 
 ### Push notifications
 

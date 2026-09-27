@@ -137,10 +137,3 @@ else
 fi
 
 echo "local ICE/TURN secrets are ready in: $secrets_dir"
-echo "validate with: docker compose --env-file deploy/.env --profile local-turn config"
-echo "Allow inbound TCP and UDP $turn_listen_port and UDP ${TURN_RELAY_MIN_PORT:-49160}-${TURN_RELAY_MAX_PORT:-49200} in both the host and hosting-provider firewalls."
-echo "For an active UFW firewall:"
-echo "  sudo ufw allow $turn_listen_port/tcp"
-echo "  sudo ufw allow $turn_listen_port/udp"
-echo "  sudo ufw allow ${TURN_RELAY_MIN_PORT:-49160}:${TURN_RELAY_MAX_PORT:-49200}/udp"
-echo "Firewall rules have not been changed. After startup, run: node deploy/smoke-test-turn.mjs"

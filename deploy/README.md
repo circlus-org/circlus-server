@@ -78,8 +78,8 @@ sudo ufw allow 49160:49200/udp
 sudo ufw status verbose
 ```
 
-Use the actual ports from `deploy/.env`; the initializer prints matching UFW
-commands after each run. It does not enable, disable or modify any firewall.
+If you changed the ports, replace the values in the commands above with those
+from `deploy/.env`. The initializer does not modify firewall rules.
 If UFW is inactive, check the firewall actually used by your host. Preserve
 existing SSH/HTTPS access. Provider firewall rules must be configured separately.
 Coturn uses `network_mode: host`, so there is no Docker port-publication rule
@@ -115,7 +115,8 @@ Container health checks local STUN liveness and secret/config availability.
 `node deploy/smoke-test-ice.mjs` checks only credential issuance. Neither checks
 authenticated TURN relaying or public reachability.
 
-With Node.js 24+ on the VPS, run from the repository root:
+Once the containers are running, run this command from the repository root
+(requires Node.js 24+ on the VPS):
 
 ```bash
 node deploy/smoke-test-turn.mjs
@@ -149,9 +150,11 @@ The printed expiration time limits how long the file works. Remove the temporary
 file on both machines afterwards. Never copy `deploy/secrets/` for this test.
 This test exercises two relay allocations on the same TURN server; it does not
 exhaustively test reachability of relay ports from every possible peer/network.
-Finally, make a new browser call with **Always TURN** enabled between devices
-on different networks. Check for `relay` candidates and audio in both directions,
-then restore your preferred setting.
+
+To check a call through the relay, enable **Always TURN** in the web client. This forces
+call media through the TURN relay instead of a direct connection. Make a new
+call between devices on different networks, check for `relay` candidates and
+audio in both directions, then restore your preferred setting.
 
 | Symptom | Next check |
 | --- | --- |

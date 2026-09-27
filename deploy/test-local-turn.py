@@ -43,7 +43,7 @@ def main():
         base.chmod(0o755)
         stack = base / 'stack'
         prepare(stack)
-        first = run(['sh', 'deploy/init-local-turn.sh'], cwd=stack)
+        run(['sh', 'deploy/init-local-turn.sh'], cwd=stack)
         secret = stack / 'deploy/secrets/turn-local.secret'
         original = secret.read_bytes()
         env_before = (stack / 'deploy/.env').read_bytes()
@@ -57,14 +57,15 @@ def main():
         assert secret.stat().st_mode & 0o777 == 0o640
         assert (stack / 'deploy/.env').read_bytes() == env_before
         assert (stack / 'deploy/ice/turn-clusters.json').read_bytes() == config_before
-        assert 'sudo ufw allow 3478/tcp' in first.stdout
-        # The firewall advice follows the configured ports; it never runs UFW.
+        # Reinitializing with changed ports must preserve the existing ICE JSON.
         settings = stack / 'deploy/.env'
         settings.write_text(settings.read_text().replace('TURN_LISTEN_PORT=3478', 'TURN_LISTEN_PORT=13478')
                             .replace('TURN_RELAY_MIN_PORT=49160', 'TURN_RELAY_MIN_PORT=55000')
                             .replace('TURN_RELAY_MAX_PORT=49200', 'TURN_RELAY_MAX_PORT=55020'))
-        advice = run(['sh', 'deploy/init-local-turn.sh'], cwd=stack).stdout
-        assert 'sudo ufw allow 13478/tcp' in advice and 'sudo ufw allow 55000:55020/udp' in advice
+        run(['sh', 'deploy/init-local-turn.sh'], cwd=stack)
+        assert 'TURN_LISTEN_PORT=13478' in settings.read_text()
+        assert 'TURN_RELAY_MIN_PORT=55000' in settings.read_text()
+        assert 'TURN_RELAY_MAX_PORT=55020' in settings.read_text()
         assert (stack / 'deploy/ice/turn-clusters.json').read_bytes() == config_before
         settings.write_bytes(env_before)
         # A file override must get the same permissions and Compose group.
@@ -75,7 +76,7 @@ def main():
         run(['sh', 'deploy/init-local-turn.sh'], cwd=stack)
         assert alternate.stat().st_mode & 0o777 == 0o640 and alternate.read_bytes() == original
         settings.write_bytes(env_before)
-        print('PASS: initialization repairs permissions, preserves credentials/configuration and prints configured ports', flush=True)
+        print('PASS: initialization repairs permissions and preserves credentials, configuration and port settings', flush=True)
 
         def probe(secret_path, group=None, tr_failure=False):
             stub = base / 'bin'
