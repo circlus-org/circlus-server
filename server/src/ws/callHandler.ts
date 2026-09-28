@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import {
   callSessionRepository,
+  callHistoryRepository,
   deviceRepository,
   identityRepository,
   temporaryDeviceRepository
@@ -14,6 +15,7 @@ import { CallRingingService } from '../services/callRingingService';
 import { CallExpirationService } from '../services/callExpirationService';
 import { CallSessionRoutingRegistry } from '../services/callSessionRoutingRegistry';
 import { CallSignalingRecovery } from '../services/callSignalingRecovery';
+import { readEndedCallForResume } from '../services/endedCallResume';
 import { DirectFileTransferSignalingService } from '../services/directFileTransferSignalingService';
 import {
   CallLifecycleServiceError,
@@ -841,7 +843,7 @@ const wsMessageHandlers = {
     ws,
     data as WSCallHeartbeatData
   ),
-  'call:resume': (ws, data) => {
+  'call:resume': async (ws, data) => {
     const info = connectionRegistry.getInfo(ws);
     const callSessionId = String((data as WSCallResumeData | undefined)?.callSessionId || '').trim();
     if (!info || !callSessionId) {
@@ -856,6 +858,16 @@ const wsMessageHandlers = {
       (route.initiatorIdentityId === info.identityId && route.initiatorWs === ws)
       || (route.targetIdentityId === info.identityId && route.acceptedTargetWs === ws)
     ));
+    if (!resumed && !alreadyBound) {
+      const ended = await readEndedCallForResume(info, callSessionId, {
+        findSession: (familyId, sessionId) => callSessionRepository.findByCallSessionId(familyId, sessionId),
+        findHistory: (familyId, sessionId) => callHistoryRepository.findByCallSessionId(familyId, sessionId)
+      });
+      if (ended) {
+        sendMessage(ws, { type: 'call:ended', data: ended, timestamp: Date.now() });
+        return;
+      }
+    }
     logger.info('call_signaling_resume_result', {
       callSessionId,
       familyId: info.familyId,
