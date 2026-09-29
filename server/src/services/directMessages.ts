@@ -5,6 +5,7 @@ import type {
   ErrorCode,
   DirectMessageAuthorClaim,
   DirectMessageDeliveryProof,
+  DirectMessageReadProof,
   IdentityId,
   MessageStatus,
   PublicKey,
@@ -31,6 +32,7 @@ import { getRequestLogger } from '../middleware/requestContext';
 import { validateDirectMessageAuthorClaim } from './directMessageTrustProtocol';
 import { recordForegroundMessageActivity } from './foregroundPresenceActivity';
 import { verifyDirectMessageDeliveryProof } from './directMessageDeliveryProof';
+import { verifyDirectMessageReadProof } from './directMessageReadProof';
 
 const MAX_MESSAGE_BYTES = getFeaturePolicyRuntimeConfig().messages.maxCiphertextBytes;
 
@@ -331,6 +333,7 @@ export async function sendDirectMessage(params: {
     {
       peerIdentityId: params.senderIdentityId,
       dialogId: params.senderIdentityId,
+      messageCreatedAt: createdAt,
       notificationPreview: params.notificationPreviewCiphertext && params.epoch
         ? {
             version: 1,
@@ -416,8 +419,10 @@ export async function updateDirectMessageStatus(params: {
   const statusUpdate: WSMessageStatusUpdateData = {
     serverMessageId: message.server_message_id,
     status: newStatus,
-    serverTimestamp: statusUpdatedAt,
+    serverTimestamp: newStatus === 'read' && !message.read_proof?.receipt.payload.readTimeVisible
+      ? Number(message.read_proof?.receipt.timestamp ?? message.created_at) : statusUpdatedAt,
     ...(message.delivery_proof ? { deliveryProof: message.delivery_proof } : {}),
+    ...(message.read_proof ? { readProof: message.read_proof } : {}),
   };
   sendStatusUpdate(params.familyId, message.sender_identity_id, directChatId, statusUpdate);
 
@@ -425,6 +430,7 @@ export async function updateDirectMessageStatus(params: {
     void sendMessagesReadPush(params.familyId, params.identityId, {
       dialogId: message.sender_identity_id,
       peerIdentityId: message.sender_identity_id,
+      readThrough: message.created_at,
     });
   }
 
@@ -617,11 +623,51 @@ export async function deleteDirectMessage(params: {
 export async function markDirectMessagesRead(params: {
   familyId: string;
   identityId: IdentityId;
+  deviceId?: string;
   peerIdentityId: IdentityId;
   readThrough: number;
+  readProof?: DirectMessageReadProof;
 }): Promise<{ statusUpdates: WSMessageStatusUpdateData[]; readCursor: WSReadCursorPushData }> {
   const now = Date.now();
   const directChatId = getDirectChatId(params.identityId, params.peerIdentityId);
+  let proofMessages: Array<{ server_message_id: string; created_at: number }> = [];
+  let proof: DirectMessageReadProof | undefined;
+
+  if (params.readProof) {
+    const identity = await identityRepository.findByIdentityId(params.familyId, params.identityId);
+    if (!identity || !params.deviceId || !verifyDirectMessageReadProof({
+      proof: params.readProof,
+      senderIdentityId: params.peerIdentityId,
+      recipientIdentityId: params.identityId,
+      recipientDeviceId: params.deviceId,
+      recipientIdentityPublicKey: {
+        algorithm: identity.public_key_algorithm as 'ed25519' | 'x25519',
+        value: identity.public_key_value
+      },
+      nowMs: now
+    })) {
+      throw new DirectMessageServiceError(400, 'INVALID_SIGNATURE' as ErrorCode, 'Invalid read proof');
+    }
+    const receipt = params.readProof.receipt;
+    if (!identity.presence_visible && receipt.payload.readTimeVisible) {
+      throw new DirectMessageServiceError(409, 'INVALID_STATE' as ErrorCode, 'READ_TIME_HIDDEN');
+    }
+    const ids = receipt.payload.serverMessageIds;
+    proofMessages = await messageRepository.fetchMessagesForReadProof(
+      params.familyId, params.peerIdentityId, params.identityId, ids
+    );
+    const delegationNotBefore = params.readProof.temporaryIdentityDelegation
+      ? Date.parse(params.readProof.temporaryIdentityDelegation.payload.notBefore) : 0;
+    const hiddenTimestamp = Math.max(params.readThrough, delegationNotBefore);
+    if (proofMessages.length !== ids.length
+      || (!receipt.payload.readTimeVisible && receipt.timestamp !== hiddenTimestamp)
+      || proofMessages.some((message) => (
+        message.created_at > params.readThrough || message.created_at > receipt.timestamp + 5 * 60_000
+      ))) {
+      throw new DirectMessageServiceError(400, 'INVALID_REQUEST' as ErrorCode, 'Read proof does not match this chat cursor');
+    }
+    proof = params.readProof;
+  }
 
   await messageRepository.upsertReadCursor(
     params.familyId,
@@ -639,21 +685,41 @@ export async function markDirectMessagesRead(params: {
   );
 
   const statusUpdates: WSMessageStatusUpdateData[] = [];
+  const proofIds = new Set(proofMessages.map((message) => message.server_message_id));
   for (const message of unread) {
+    if (proof && proofIds.has(message.server_message_id)) continue;
     await messageRepository.updateStatus(params.familyId, message.server_message_id, 'read', now);
     const statusUpdate = {
       serverMessageId: message.server_message_id,
       status: 'read' as const,
-      serverTimestamp: now,
+      serverTimestamp: message.created_at,
     };
     statusUpdates.push(statusUpdate);
     sendStatusUpdate(params.familyId, params.peerIdentityId, directChatId, statusUpdate);
+  }
+
+  if (proof) {
+    for (const message of proofMessages) {
+      const recorded = await messageRepository.recordReadProof(
+        params.familyId, params.peerIdentityId, params.identityId, message.server_message_id, proof, now
+      );
+      if (!recorded) continue;
+      const statusUpdate: WSMessageStatusUpdateData = {
+        serverMessageId: message.server_message_id,
+        status: 'read',
+        serverTimestamp: proof.receipt.payload.readTimeVisible ? now : proof.receipt.timestamp,
+        readProof: proof
+      };
+      statusUpdates.push(statusUpdate);
+      sendStatusUpdate(params.familyId, params.peerIdentityId, directChatId, statusUpdate);
+    }
   }
 
   if (unread.length > 0) {
     void sendMessagesReadPush(params.familyId, params.identityId, {
       dialogId: params.peerIdentityId,
       peerIdentityId: params.peerIdentityId,
+      readThrough: params.readThrough,
     });
   }
 
@@ -821,8 +887,10 @@ export async function fetchDirectMessageStatusSync(params: {
   const updates: WSMessageStatusUpdateData[] = page.map((message) => ({
     serverMessageId: message.server_message_id,
     status: message.status === 'new' ? 'delivered' : message.status,
-    serverTimestamp: Number(message.status_updated_at),
+    serverTimestamp: message.status === 'read' && !message.read_proof?.receipt.payload.readTimeVisible
+      ? Number(message.read_proof?.receipt.timestamp ?? message.created_at) : Number(message.status_updated_at),
     ...(message.delivery_proof ? { deliveryProof: message.delivery_proof } : {}),
+    ...(message.read_proof ? { readProof: message.read_proof } : {}),
   }));
   const syncedThrough = page.length > 0 ? Number(page[page.length - 1].status_updated_at) : since;
   return { updates, syncedThrough, hasMore };

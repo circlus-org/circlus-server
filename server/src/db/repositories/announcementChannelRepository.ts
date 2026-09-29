@@ -141,6 +141,7 @@ export type VisibleAnnouncementChannelRecord = AnnouncementChannelRecord & {
 export type AnnouncementChannelRecipientRecord = {
   subscription_id: string;
   registration_id: string | null;
+  can_message: boolean | null;
   guest_identity_id: string;
   guest_identity_name: string | null;
   guest_public_key_algorithm: 'ed25519' | 'x25519' | null;
@@ -1000,6 +1001,7 @@ export class AnnouncementChannelRepository {
       `SELECT DISTINCT ON (s.subscriber_identity_id)
          s.subscription_id,
          r.registration_id,
+         r.can_message,
          s.subscriber_identity_id AS guest_identity_id,
          i.identity_name AS guest_identity_name,
          i.public_key_algorithm AS guest_public_key_algorithm,
@@ -1016,16 +1018,14 @@ export class AnnouncementChannelRepository {
         AND i.status = 'active'
        LEFT JOIN LATERAL (
          SELECT registration.registration_id,
+                registration.guest_can_message_host AS can_message,
                 registration.guest_identity_id,
                 registration.created_at
-         FROM announcement_channel_links acl
-         JOIN direct_guest_registrations registration
-           ON registration.family_id = acl.family_id
-          AND registration.link_id = acl.link_id
-          AND registration.guest_identity_id = s.subscriber_identity_id
-          AND registration.status = 'active'
-         WHERE acl.family_id = s.family_id
-           AND acl.channel_id = s.channel_id
+         FROM direct_guest_registrations registration
+         WHERE registration.family_id = s.family_id
+           AND registration.host_identity_id = $3
+           AND registration.guest_identity_id = s.subscriber_identity_id
+           AND registration.status = 'active'
          ORDER BY registration.created_at DESC
          LIMIT 1
        ) r ON TRUE

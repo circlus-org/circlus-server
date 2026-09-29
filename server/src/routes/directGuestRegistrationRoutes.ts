@@ -341,6 +341,18 @@ router.post('/registrations/:registrationId/permissions/update', verifySignature
 
     const guestCanMessageHost = payload.canMessage === true;
     const guestCanCallHost = payload.canCall === true;
+    if (guestCanMessageHost && !(existing.guest_can_message_host ?? existing.can_message)) {
+      return res.status(409).json({
+        status: 'error',
+        error: { code: 'INVALID_STATE' as ErrorCode, message: 'Guest acceptance is required to enable direct chat' }
+      } as ApiResponse);
+    }
+    if (!guestCanMessageHost && guestCanCallHost) {
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'INVALID_REQUEST' as ErrorCode, message: 'Calls require direct chat' }
+      } as ApiResponse);
+    }
     const requestedGuestCanDirectFileTransferHost = payload.canDirectFileTransfer === true;
     const requestedGuestCanServerAttachmentsHost = payload.canServerAttachments === true;
     if (!guestCanMessageHost && (requestedGuestCanDirectFileTransferHost || requestedGuestCanServerAttachmentsHost)) {
@@ -373,13 +385,13 @@ router.post('/registrations/:registrationId/permissions/update', verifySignature
       canCall: guestCanCallHost,
       canDirectFileTransfer: guestCanDirectFileTransferHost,
       canServerAttachments: guestCanServerAttachmentsHost,
-      hostCanMessageGuest: true,
+      hostCanMessageGuest: guestCanMessageHost,
       guestCanMessageHost,
-      hostCanCallGuest: true,
+      hostCanCallGuest: guestCanMessageHost,
       guestCanCallHost,
-      hostCanDirectFileTransferGuest: true,
+      hostCanDirectFileTransferGuest: guestCanMessageHost,
       guestCanDirectFileTransferHost,
-      hostCanServerAttachmentsGuest: true,
+      hostCanServerAttachmentsGuest: guestCanMessageHost,
       guestCanServerAttachmentsHost,
     });
     if (!updated) {

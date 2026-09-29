@@ -2,7 +2,7 @@ import { rememberMessageSend } from '../../services/messageSendReceipt';
 import { MessageRevisionConflict, sameMessageClaim } from '../../services/messageRevision';
 import type { PoolClient } from 'pg';
 import { pool } from '../index';
-import type { DeviceId, DirectEpochTransitionClaim, DirectMessageAuthorClaim, DirectMessageDeliveryProof, IdentityId, MessageStatus, TemporaryIdentityDelegationCredential } from '@shared/types';
+import type { DeviceId, DirectEpochTransitionClaim, DirectMessageAuthorClaim, DirectMessageDeliveryProof, DirectMessageReadProof, IdentityId, MessageStatus, TemporaryIdentityDelegationCredential } from '@shared/types';
 import type { FindDirectMessageByIdResult, FindMessageDeviceSyncStateResult } from './messageRepository.queries';
 import {
   updateDirectMessageStatus,
@@ -40,6 +40,7 @@ export type MessageRecord = {
   status: MessageStatus;
   status_updated_at: number;
   delivery_proof?: DirectMessageDeliveryProof | null;
+  read_proof?: DirectMessageReadProof | null;
   epoch: number | null;
 };
 
@@ -84,6 +85,7 @@ function mapMessage(row: FindDirectMessageByIdResult): MessageRecord {
     temporary_identity_delegation?: TemporaryIdentityDelegationCredential | string | null;
     author_claim?: DirectMessageAuthorClaim | string | null;
     delivery_proof?: DirectMessageDeliveryProof | string | null;
+    read_proof?: DirectMessageReadProof | string | null;
   };
   return {
     ...row,
@@ -96,6 +98,7 @@ function mapMessage(row: FindDirectMessageByIdResult): MessageRecord {
     temporary_identity_delegation: parseJsonField<TemporaryIdentityDelegationCredential>(rowAny.temporary_identity_delegation),
     author_claim: parseJsonField<DirectMessageAuthorClaim>(rowAny.author_claim),
     delivery_proof: parseJsonField<DirectMessageDeliveryProof>(rowAny.delivery_proof),
+    read_proof: parseJsonField<DirectMessageReadProof>(rowAny.read_proof),
     status: row.status as MessageStatus,
     client_created_at: row.client_created_at === null ? null : Number(row.client_created_at),
     created_at: Number(row.created_at),
@@ -776,6 +779,41 @@ export class MessageRepository {
     );
   }
 
+  async fetchMessagesForReadProof(
+    familyId: string,
+    senderIdentityId: IdentityId,
+    recipientIdentityId: IdentityId,
+    serverMessageIds: string[]
+  ): Promise<Array<{ server_message_id: string; created_at: number; status: MessageStatus; read_proof: DirectMessageReadProof | null }>> {
+    const result = await pool.query<{ server_message_id: string; created_at: string; status: MessageStatus; read_proof: DirectMessageReadProof | null }>(
+      `SELECT server_message_id, created_at, status, read_proof
+       FROM messages
+       WHERE family_id = $1 AND sender_identity_id = $2 AND recipient_identity_id = $3
+         AND server_message_id = ANY($4::text[])`,
+      [familyId, senderIdentityId, recipientIdentityId, serverMessageIds]
+    );
+    return result.rows.map((row) => ({ ...row, created_at: Number(row.created_at) }));
+  }
+
+  async recordReadProof(
+    familyId: string,
+    senderIdentityId: IdentityId,
+    recipientIdentityId: IdentityId,
+    serverMessageId: string,
+    proof: DirectMessageReadProof,
+    updatedAt: number
+  ): Promise<boolean> {
+    const result = await pool.query(
+      `UPDATE messages
+       SET read_proof = $5::jsonb, status = 'read', status_updated_at = $6
+       WHERE family_id = $1 AND sender_identity_id = $2 AND recipient_identity_id = $3
+         AND server_message_id = $4
+         AND (read_proof IS NULL OR (read_proof->'receipt'->>'timestamp')::bigint > $7)`,
+      [familyId, senderIdentityId, recipientIdentityId, serverMessageId, JSON.stringify(proof), updatedAt, proof.receipt.timestamp]
+    );
+    return (result.rowCount || 0) > 0;
+  }
+
   async fetchReadCursors(
     familyId: string,
     readerIdentityId: IdentityId
@@ -797,9 +835,9 @@ export class MessageRepository {
     senderIdentityId: IdentityId,
     recipientIdentityId: IdentityId,
     readThrough: number
-  ): Promise<Array<{ server_message_id: string }>> {
-    const result = await pool.query<{ server_message_id: string }>(
-      `SELECT server_message_id
+  ): Promise<Array<{ server_message_id: string; created_at: number }>> {
+    const result = await pool.query<{ server_message_id: string; created_at: string }>(
+      `SELECT server_message_id, created_at
        FROM messages
        WHERE family_id = $1
          AND sender_identity_id = $2
@@ -808,7 +846,7 @@ export class MessageRepository {
          AND status <> 'read'`,
       [familyId, senderIdentityId, recipientIdentityId, readThrough]
     );
-    return result.rows;
+    return result.rows.map((row) => ({ server_message_id: row.server_message_id, created_at: Number(row.created_at) }));
   }
 
   async cleanupExpiredMessages(defaultTtlHours: number, nowMs: number = Date.now()): Promise<number> {

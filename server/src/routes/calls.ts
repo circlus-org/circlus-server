@@ -99,6 +99,7 @@ router.post('/handling-event', verifySignature, requireActiveIdentity, reliableO
       eventType?: string;
       occurredAt?: number;
       reasonCode?: string | null;
+      blockingCallSessionId?: string | null;
     }>(req);
     const deliveryStatus = await recordCallHandlingEventForActor(actor, payload);
     if (deliveryStatus) {

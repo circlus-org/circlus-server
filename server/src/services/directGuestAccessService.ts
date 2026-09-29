@@ -31,7 +31,7 @@ export function normalizeDirectGuestPermissions(value: unknown): DirectGuestPerm
     : hasCanServerAttachments
       ? source.canServerAttachments === true
       : source.canDirectFileTransfer === true;
-  if (!guestCanMessageHost && (requestedGuestCanDirectFileTransferHost || requestedGuestCanServerAttachmentsHost)) {
+  if (!guestCanMessageHost && (guestCanCallHost || requestedGuestCanDirectFileTransferHost || requestedGuestCanServerAttachmentsHost)) {
     return null;
   }
   const guestCanDirectFileTransferHost = guestCanMessageHost && requestedGuestCanDirectFileTransferHost;
@@ -41,23 +41,17 @@ export function normalizeDirectGuestPermissions(value: unknown): DirectGuestPerm
     canCall: guestCanCallHost,
     canDirectFileTransfer: guestCanDirectFileTransferHost,
     canServerAttachments: guestCanServerAttachmentsHost,
-    hostCanMessageGuest: true,
+    hostCanMessageGuest: guestCanMessageHost,
     guestCanMessageHost,
-    hostCanCallGuest: true,
+    hostCanCallGuest: guestCanMessageHost,
     guestCanCallHost,
-    hostCanDirectFileTransferGuest: true,
+    hostCanDirectFileTransferGuest: guestCanMessageHost,
     guestCanDirectFileTransferHost,
-    hostCanServerAttachmentsGuest: true,
+    hostCanServerAttachmentsGuest: guestCanMessageHost,
     guestCanServerAttachmentsHost,
     autoSubscribeToChannel
   };
-  return permissions.canMessage
-    || permissions.canCall
-    || permissions.canDirectFileTransfer
-    || permissions.canServerAttachments
-    || permissions.autoSubscribeToChannel
-    ? permissions
-    : null;
+  return permissions.canMessage || permissions.autoSubscribeToChannel ? permissions : null;
 }
 
 export function mapDirectGuestPermissionsToDb(permissions: DirectGuestPermissions): DirectGuestPermissionFlags {
@@ -81,14 +75,14 @@ export function mapDirectGuestPermissionsToDb(permissions: DirectGuestPermission
 export function mapDirectGuestPermissionsFromDb(
   flags: DirectGuestPermissionFlags | DirectGuestRegistrationPermissionFlags
 ): DirectGuestPermissions {
-  const hostCanMessageGuest = true;
   const guestCanMessageHost = flags.guest_can_message_host ?? flags.can_message;
-  const hostCanCallGuest = true;
+  const hostCanMessageGuest = !!guestCanMessageHost;
+  const hostCanCallGuest = !!guestCanMessageHost;
   const guestCanCallHost = flags.guest_can_call_host ?? flags.can_call;
-  const hostCanDirectFileTransferGuest = true;
+  const hostCanDirectFileTransferGuest = !!guestCanMessageHost;
   const guestCanDirectFileTransferHost = !!guestCanMessageHost
     && !!(flags.guest_can_direct_file_transfer_host ?? flags.can_direct_file_transfer);
-  const hostCanServerAttachmentsGuest = true;
+  const hostCanServerAttachmentsGuest = !!guestCanMessageHost;
   const guestCanServerAttachmentsHost = !!guestCanMessageHost
     && !!(flags.guest_can_server_attachments_host ?? flags.can_server_attachments ?? flags.can_direct_file_transfer);
   return {

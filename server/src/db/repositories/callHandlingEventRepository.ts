@@ -9,6 +9,7 @@ export type CallHandlingEventRow = {
   family_id: string;
   event_type: string;
   reason_code: string | null;
+  blocking_call_session_id: string | null;
   occurred_at: number;
   recorded_at: number;
 };
@@ -33,8 +34,8 @@ export class CallHandlingEventRepository {
     await pool.query(
       `INSERT INTO call_handling_events (
          call_session_id, identity_id, device_id, family_id,
-         event_type, reason_code, occurred_at, recorded_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         event_type, reason_code, blocking_call_session_id, occurred_at, recorded_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         params.callSessionId,
         params.identityId,
@@ -42,6 +43,7 @@ export class CallHandlingEventRepository {
         params.familyId,
         params.report.eventType,
         params.report.reasonCode || null,
+        params.report.blockingCallSessionId || null,
         params.report.occurredAt,
         recordedAt
       ]
@@ -51,7 +53,7 @@ export class CallHandlingEventRepository {
   async listByCallSession(familyId: string, callSessionId: CallSessionId): Promise<CallHandlingEventRow[]> {
     const result = await query<CallHandlingEventRow>(
       `SELECT event_id, call_session_id, identity_id, device_id, family_id,
-              event_type, reason_code, occurred_at, recorded_at
+              event_type, reason_code, blocking_call_session_id, occurred_at, recorded_at
        FROM call_handling_events
        WHERE family_id = $1 AND call_session_id = $2
        ORDER BY recorded_at ASC, event_id ASC`,

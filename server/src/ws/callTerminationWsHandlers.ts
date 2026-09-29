@@ -513,7 +513,7 @@ export class CallTerminationWsHandlers {
       await sendCallStatusPush(params.familyId, otherParticipant, {
         callSessionId: params.callSessionId,
         callStatus: 'ended',
-        callEndReason: 'normal',
+        callEndReason: 'declined',
         fromIdentityId: params.targetIdentityId,
         fromIdentityName: callLinkPresentation.isTemporaryLinkCall ? undefined : fromIdentityName,
         ...callLinkPresentation

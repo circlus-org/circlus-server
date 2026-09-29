@@ -621,6 +621,7 @@ export async function sendIncomingMessagePush(
     chatId?: string;
     channelId?: string;
     dialogId?: string;
+    messageCreatedAt?: number;
     notificationPreview?: PushPayload['notificationPreview'];
   }
 ): Promise<PushIdentityDeliveryResult> {
@@ -629,6 +630,7 @@ export async function sendIncomingMessagePush(
     {
     type: 'incoming_message',
     messageId: serverMessageId,
+    messageCreatedAt: params?.messageCreatedAt,
     dialogId,
     fromIdentityId: senderIdentityId,
     fromIdentityName: senderIdentityName,
@@ -652,11 +654,13 @@ export async function sendMessagesReadPush(
     dialogId: string;
     peerIdentityId?: IdentityId;
     chatId?: string;
+    readThrough?: number;
   }
 ): Promise<PushIdentityDeliveryResult> {
   const payload: PushPayload = withTimestamps(
     {
     type: 'messages_read',
+    readThrough: params.readThrough,
     dialogId: params.dialogId,
     peerIdentityId: params.peerIdentityId,
     chatId: params.chatId,

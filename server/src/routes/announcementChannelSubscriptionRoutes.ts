@@ -250,6 +250,7 @@ router.post('/:channelId/recipients', verifySignature, requireActiveIdentity, as
       result: recipients.map((recipient) => ({
         subscriptionId: recipient.subscription_id,
         registrationId: recipient.registration_id,
+        canMessage: recipient.can_message,
         guestIdentityId: recipient.guest_identity_id,
         guestIdentityName: null,
         guestIdentityPublicKey: recipient.guest_public_key_algorithm && recipient.guest_public_key_value

@@ -224,8 +224,10 @@ export class DirectMessageWsHandlers {
     const updates: WSMessageStatusUpdateData[] = page.map((message) => ({
       serverMessageId: message.server_message_id,
       status: message.status === 'new' ? 'delivered' : message.status,
-      serverTimestamp: Number(message.status_updated_at),
-      ...(message.delivery_proof ? { deliveryProof: message.delivery_proof } : {})
+      serverTimestamp: message.status === 'read' && !message.read_proof?.receipt.payload.readTimeVisible
+        ? Number(message.read_proof?.receipt.timestamp ?? message.created_at) : Number(message.status_updated_at),
+      ...(message.delivery_proof ? { deliveryProof: message.delivery_proof } : {}),
+      ...(message.read_proof ? { readProof: message.read_proof } : {})
     }));
     const syncedThrough = page.length > 0 ? Number(page[page.length - 1].status_updated_at) : since;
     this.dependencies.sendMessage(ws, {

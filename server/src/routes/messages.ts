@@ -12,6 +12,7 @@ import type {
   DirectEpochTransitionPayload,
   DirectMessageAuthorClaim,
   DirectMessageDeliveryProof,
+  DirectMessageReadProof,
   ErrorCode,
   IdentityId,
   PublicKey,
@@ -788,10 +789,10 @@ router.post('/mark-read', verifySignature, requireActiveIdentity, requireGranted
       } as ApiResponse);
     }
 
-    const payload = getSignedPayload<{ peerIdentityId?: string; readThrough?: number }>(req);
+    const payload = getSignedPayload<{ peerIdentityId?: string; readThrough?: number; readProof?: DirectMessageReadProof }>(req);
     const peerIdentityId = String(payload.peerIdentityId || '').trim();
     const readThrough = Number(payload.readThrough || 0);
-    if (!peerIdentityId || !Number.isFinite(readThrough) || readThrough <= 0) {
+    if (!peerIdentityId || !Number.isFinite(readThrough) || readThrough <= 0 || readThrough > Date.now() + 5 * 60_000) {
       return res.status(400).json({
         status: 'error',
         error: {
@@ -804,8 +805,10 @@ router.post('/mark-read', verifySignature, requireActiveIdentity, requireGranted
     const result = await markDirectMessagesRead({
       familyId,
       identityId,
+      deviceId: req.device?.deviceId,
       peerIdentityId,
       readThrough,
+      readProof: payload.readProof,
     });
 
     return res.json({

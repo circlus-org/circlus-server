@@ -118,6 +118,7 @@ export async function recordCallHandlingEventForActor(
     eventType?: string;
     occurredAt?: number;
     reasonCode?: string | null;
+    blockingCallSessionId?: string | null;
   }
 ): Promise<{
   callerIdentityId: IdentityId;
@@ -144,7 +145,10 @@ export async function recordCallHandlingEventForActor(
     callSessionId,
     eventType,
     occurredAt: Math.floor(occurredAt),
-    reasonCode: sanitizeReasonCode(payload.reasonCode)
+    reasonCode: sanitizeReasonCode(payload.reasonCode),
+    blockingCallSessionId: eventType === 'busy'
+      ? sanitizeReasonCode(payload.blockingCallSessionId)
+      : null
   };
   await callHandlingEventRepository.save({
     familyId: actor.familyId,
@@ -162,6 +166,11 @@ export async function recordCallHandlingEventForActor(
   if (callLog.initiator_identity_id === actor.identityId) return null;
 
   const callSession = await callSessionRepository.findByCallSessionId(actor.familyId, callSessionId);
+  // A late Android handling report must not mark an answered call as declined.
+  if (
+    deliveryStatus.status === 'declined' &&
+    (!callSession || (callSession.state !== 'new' && callSession.state !== 'ringing'))
+  ) return null;
   const shouldEndCall =
     report.eventType === 'busy' &&
     !!callSession &&

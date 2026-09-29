@@ -1,9 +1,14 @@
 jest.mock('../db/repositories', () => ({
   callHistoryRepository: {
     recordMediaConnection: jest.fn(),
+    findByCallSessionId: jest.fn(),
+    markRejected: jest.fn(),
     markConnected: jest.fn(),
     markHeartbeat: jest.fn(),
     markFinalized: jest.fn()
+  },
+  callHandlingEventRepository: {
+    save: jest.fn()
   },
   callSessionRepository: {
     findByCallSessionId: jest.fn(),
@@ -19,6 +24,7 @@ jest.mock('../db/repositories', () => ({
 
 import {
   callClientDiagnosticsRepository,
+  callHandlingEventRepository,
   callHistoryRepository,
   callQualityDailyRepository,
   callSessionRepository
@@ -27,7 +33,8 @@ import {
   CallLifecycleServiceError,
   finalizeCallForActor,
   markCallConnectedForActor,
-  markCallHeartbeatForActor
+  markCallHeartbeatForActor,
+  recordCallHandlingEventForActor
 } from './callLifecycleService';
 import type { AuthenticatedActor } from './authenticatedActor';
 
@@ -40,6 +47,48 @@ const actor: AuthenticatedActor = {
 describe('callLifecycleService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('publishes decline only while the call is still ringing', async () => {
+    (callHistoryRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      initiator_identity_id: 'bob', target_identity_id: 'alice'
+    });
+    const report = { callSessionId: 'call-1', eventType: 'declined', occurredAt: 123 };
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['alice', 'bob'], state: 'ringing'
+    });
+    await expect(recordCallHandlingEventForActor(actor, report)).resolves.toMatchObject({
+      callSessionId: 'call-1', status: 'declined'
+    });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['alice', 'bob'], state: 'accepted'
+    });
+    await expect(recordCallHandlingEventForActor(actor, report)).resolves.toBeNull();
+    expect(callHandlingEventRepository.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the blocking call ID separate from the busy reason', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['alice', 'bob'], state: 'ringing'
+    });
+    (callHistoryRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      initiator_identity_id: 'bob', target_identity_id: 'alice'
+    });
+
+    await expect(recordCallHandlingEventForActor(actor, {
+      callSessionId: 'call-new',
+      eventType: 'busy',
+      reasonCode: 'active_native_call',
+      blockingCallSessionId: 'call-previous',
+      occurredAt: 123
+    })).resolves.toMatchObject({
+      status: 'busy', reason: 'active_native_call', shouldEndCall: true
+    });
+    expect(callHandlingEventRepository.save).toHaveBeenCalledWith(expect.objectContaining({
+      report: expect.objectContaining({
+        reasonCode: 'active_native_call', blockingCallSessionId: 'call-previous'
+      })
+    }));
   });
 
   it('rejects heartbeat from a non-participant', async () => {

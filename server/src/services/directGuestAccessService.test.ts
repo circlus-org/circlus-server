@@ -22,7 +22,7 @@ describe('direct guest permission mapping', () => {
     expect(permissions).toEqual(expect.objectContaining({
       canMessage: false,
       guestCanMessageHost: false,
-      hostCanMessageGuest: true,
+      hostCanMessageGuest: false,
       autoSubscribeToChannel: true
     }));
   });
@@ -45,9 +45,9 @@ describe('direct guest permission mapping', () => {
       canMessage: false,
       canCall: false,
       canDirectFileTransfer: false,
-      hostCanMessageGuest: true,
-      hostCanCallGuest: true,
-      hostCanDirectFileTransferGuest: true,
+      hostCanMessageGuest: false,
+      hostCanCallGuest: false,
+      hostCanDirectFileTransferGuest: false,
       guestCanMessageHost: false,
       guestCanCallHost: false,
       guestCanDirectFileTransferHost: false,
@@ -69,6 +69,16 @@ describe('direct guest permission mapping', () => {
       canServerAttachments: false,
       guestCanServerAttachmentsHost: false
     }));
+  });
+
+  test('rejects call-only guest access', () => {
+    expect(normalizeDirectGuestPermissions({
+      canMessage: false,
+      canCall: true,
+      canDirectFileTransfer: false,
+      canServerAttachments: false,
+      autoSubscribeToChannel: true
+    })).toBeNull();
   });
 
   test('rejects file permissions when guest messages are disabled', () => {

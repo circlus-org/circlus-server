@@ -234,6 +234,7 @@ router.post('/:chatId/messages/send', verifySignature, requireActiveIdentity, re
       await sendIncomingMessagePush(familyId, participantIdentityId, messageId, identityId, senderName, {
         chatId,
         dialogId: chatId,
+        messageCreatedAt: now,
         notificationPreview: notificationPreviewCiphertext && epoch
           ? {
               version: 1,
@@ -601,7 +602,7 @@ router.post('/:chatId/messages/read', verifySignature, requireActiveIdentity, re
     const payload = (req.signedRequest?.payload || {}) as { readAt?: number };
     const readAt = typeof payload.readAt === 'number' ? payload.readAt : Date.now();
     await groupChatRepository.markRead(familyId, chatId, identityId, readAt);
-    void sendMessagesReadPush(familyId, identityId, { dialogId: chatId, chatId });
+    void sendMessagesReadPush(familyId, identityId, { dialogId: chatId, chatId, readThrough: readAt });
     return res.json({ status: 'ok', result: { chatId, readAt } } as ApiResponse);
   } catch (error) {
     routeLogger.error('Mark group messages read error:', error);

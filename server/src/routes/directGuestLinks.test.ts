@@ -493,7 +493,9 @@ describe('direct guest link host restrictions', () => {
     const repositories = require('../db/repositories');
     repositories.directGuestRegistrationRepository.findActiveByHost.mockResolvedValue({
       registration_id: 'reg_1',
-      link_id: 'link_1'
+      link_id: 'link_1',
+      can_message: true,
+      guest_can_message_host: true
     });
     repositories.directGuestLinkRepository.findById.mockResolvedValue({
       link_id: 'link_1',
@@ -554,6 +556,26 @@ describe('direct guest link host restrictions', () => {
         })
       })
     }));
+  });
+
+  test('requires guest acceptance before enabling chat for a channel subscriber', async () => {
+    const repositories = require('../db/repositories');
+    repositories.directGuestRegistrationRepository.findActiveByHost.mockResolvedValue({
+      registration_id: 'reg_1', link_id: 'link_1', can_message: false,
+      guest_can_message_host: false
+    });
+    repositories.directGuestLinkRepository.findById.mockResolvedValue({
+      link_id: 'link_1', host_identity_id: 'host_identity', status: 'active',
+      auto_subscribe_to_channel: true
+    });
+    const res = makeResponse();
+    await getPostHandler('/registrations/:registrationId/permissions/update')({
+      familyId: 'family_1', params: { registrationId: 'reg_1' },
+      identity: { role: 'owner' }, device: { identityId: 'host_identity', deviceId: 'device_1' },
+      signedRequest: { payload: { canMessage: true, canCall: false, canDirectFileTransfer: false } }
+    }, res);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(repositories.directGuestRegistrationRepository.updatePermissionsByHost).not.toHaveBeenCalled();
   });
 
   test('rejects guest file permissions when messages are disabled', async () => {

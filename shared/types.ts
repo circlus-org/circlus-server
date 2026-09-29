@@ -894,6 +894,8 @@ export interface VaultContactIdentity {
   /** How this contact identity was added. Absent for legacy records; not a trust assertion. */
   addedVia?: ContactAddedVia;
   addedAt: ISODateString;
+  /** Last local reassignment of this Circle connection to another contact card. */
+  contactAssignedAt?: ISODateString;
   /**
    * Optional identity name stored on the server (if allowed and published).
    */
@@ -908,6 +910,13 @@ export interface VaultContact {
   displayName: string;
   identities: VaultContactIdentity[]; // One or more identities (server + fingerprint)
   groupId?: string;
+  /** Guest relationship stored separately, but shown under this person's contact. */
+  personContactId?: string;
+  /** Last local change of the guest relationship's parent card, including separation. */
+  personContactIdUpdatedAt?: ISODateString;
+  /** Local label for one guest relationship; independent of the person's name. */
+  guestAccessLabel?: string;
+  guestAccessLabelUpdatedAt?: ISODateString;
   relationshipKind?: 'regular' | 'direct_guest';
   directGuest?: {
     role: 'guest' | 'host';
@@ -1590,6 +1599,9 @@ export type SystemEventType =
   | 'direct-guest:revoked'
   | 'invite:accepted'
   | 'invite:guest-membership'
+  | 'invite:direct-chat'
+  | 'direct-chat:accepted'
+  | 'direct-chat:ended'
   | 'device:inactivity-warning'
   | 'circle:migration:scheduled'
   | 'circle:owner-changed';
@@ -1618,6 +1630,29 @@ export type SystemEventGuestMembershipInvitePayload = {
   registrationId: string;
   encryptedSecret: string;
   expiresAt: ISODateString;
+};
+
+export type SystemEventDirectChatInvitePayload = {
+  hostIdentityId: IdentityId;
+  guestIdentityId: IdentityId;
+  registrationId: string;
+  channelId: string;
+  expiresAt: ISODateString;
+  acceptedAt?: ISODateString;
+  declinedAt?: ISODateString;
+};
+
+export type SystemEventDirectChatAcceptedPayload = {
+  hostIdentityId: IdentityId;
+  guestIdentityId: IdentityId;
+  registrationId: string;
+  channelId: string;
+};
+
+export type SystemEventDirectChatEndedPayload = {
+  hostIdentityId: IdentityId;
+  guestIdentityId: IdentityId;
+  registrationId: string;
 };
 
 export type SystemEventDeviceInactivityWarningPayload = {
@@ -1653,6 +1688,9 @@ export type SystemEventPayloadByType = {
   'direct-guest:departed': import('./directGuestDeparture').DirectGuestDepartureNotice;
   'invite:accepted': SystemEventInviteAcceptedPayload;
   'invite:guest-membership': SystemEventGuestMembershipInvitePayload;
+  'invite:direct-chat': SystemEventDirectChatInvitePayload;
+  'direct-chat:accepted': SystemEventDirectChatAcceptedPayload;
+  'direct-chat:ended': SystemEventDirectChatEndedPayload;
   'device:inactivity-warning': SystemEventDeviceInactivityWarningPayload;
   'circle:migration:scheduled': SystemEventCircleMigrationScheduledPayload;
   'circle:owner-changed': SystemEventCircleOwnerChangedPayload;
@@ -1957,6 +1995,7 @@ export type CallHandlingEventReport = {
   eventType: CallHandlingEventType;
   occurredAt: number;
   reasonCode?: string | null;
+  blockingCallSessionId?: CallSessionId | null;
 };
 
 export type CallDeliveryStatus =
@@ -2171,6 +2210,21 @@ export type DirectMessageDeliveryProof = {
   temporaryIdentityDelegation?: TemporaryIdentityDelegationCredential;
 };
 
+export type DirectMessageReadReceipt = SignedRequest<{
+  version: 1;
+  purpose: 'direct-message-read-v1';
+  readTimeVisible: boolean;
+  senderIdentityId: IdentityId;
+  recipientIdentityId: IdentityId;
+  recipientDeviceId: DeviceId;
+  serverMessageIds: string[];
+}, IdentityId>;
+
+export type DirectMessageReadProof = {
+  receipt: DirectMessageReadReceipt;
+  temporaryIdentityDelegation?: TemporaryIdentityDelegationCredential;
+};
+
 export type WSMessageSendPayload = {
   recipientIdentityId: IdentityId;
   ciphertext: string;
@@ -2327,6 +2381,7 @@ export type WSMessageStatusUpdateData = {
   status: Exclude<MessageStatus, 'new'>;
   serverTimestamp: number;
   deliveryProof?: DirectMessageDeliveryProof;
+  readProof?: DirectMessageReadProof;
 };
 
 export type ReadCursor = {

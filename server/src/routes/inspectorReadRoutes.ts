@@ -535,7 +535,7 @@ export function registerInspectorReadRoutes(router: Router): void {
       );
       const handlingEvents = await query(
         `SELECT event_id, call_session_id, identity_id, device_id,
-                event_type, reason_code, occurred_at, recorded_at
+                event_type, reason_code, blocking_call_session_id, occurred_at, recorded_at
          FROM call_handling_events
          WHERE family_id = $1 AND call_session_id = $2
          ORDER BY recorded_at ASC, event_id ASC`,
@@ -583,7 +583,12 @@ export function registerInspectorReadRoutes(router: Router): void {
           event: row.event_type,
           identityId: row.identity_id,
           deviceId: row.device_id,
-          details: row.reason_code ? { reasonCode: row.reason_code } : undefined
+          details: row.reason_code || row.blocking_call_session_id
+            ? {
+                ...(row.reason_code ? { reasonCode: row.reason_code } : {}),
+                ...(row.blocking_call_session_id ? { blockingCallSessionId: row.blocking_call_session_id } : {})
+              }
+            : undefined
         });
       }
       for (const row of clientDiagnostics.rows) {

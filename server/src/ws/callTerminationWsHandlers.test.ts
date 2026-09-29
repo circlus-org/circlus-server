@@ -520,6 +520,9 @@ describe('call termination WebSocket handlers', () => {
     });
     expect(dependencies.sendToConnectionSet).toHaveBeenCalledTimes(2);
     expect(sendCallStatusPush).toHaveBeenCalledTimes(2);
+    expect(sendCallStatusPush).toHaveBeenCalledWith('family-1', callerIdentityId, expect.objectContaining({
+      callSessionId: 'call-1', callStatus: 'ended', callEndReason: 'declined'
+    }));
     expect(callSessionRouting.remove).toHaveBeenCalledWith('call-1');
     expect(persistAndClearCallIceStats).toHaveBeenCalledWith({
       familyId: 'family-1',

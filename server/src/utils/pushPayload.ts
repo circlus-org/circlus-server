@@ -29,8 +29,10 @@ export interface PushPayload {
   targetDeviceId?: DeviceId;
   directFileTransferStatus?: 'accepted' | 'rejected' | 'cancelled' | 'expired';
   callStatus?: 'missed' | 'answered_elsewhere' | 'ended';
-  callEndReason?: 'cancelled' | 'timeout' | 'answered_elsewhere' | 'normal' | 'unknown' | 'signaling_disconnected' | 'superseded_by_redial';
+  callEndReason?: 'cancelled' | 'declined' | 'timeout' | 'answered_elsewhere' | 'normal' | 'unknown' | 'signaling_disconnected' | 'superseded_by_redial';
   messageId?: string;
+  messageCreatedAt?: number;
+  readThrough?: number;
   dialogId?: string;
   targetIdentityId?: IdentityId;
   fromIdentityId?: IdentityId;

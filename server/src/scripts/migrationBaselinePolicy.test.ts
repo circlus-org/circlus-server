@@ -41,7 +41,9 @@ describe('Public migration baseline adoption', () => {
         '009_require_group_chat_protocol_v2.sql',
         '010_delete_legacy_identity_backups.sql',
         '011_encrypt_private_link_and_device_metadata.sql',
-        '012_encrypt_channel_metadata_and_reaction_codes.sql'
+        '012_encrypt_channel_metadata_and_reaction_codes.sql',
+        '013_call_handling_blocking_session.sql',
+        '014_direct_message_read_proof.sql'
       ]);
     }
   });

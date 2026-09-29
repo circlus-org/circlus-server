@@ -15,6 +15,10 @@ export const ACCESS_OPERATION_PATHS: Readonly<Record<string, string>> = {
   'admin:user:disable': '/admin/users/:identityId/disable',
   'admin:user:enable': '/admin/users/:identityId/enable',
   'direct-guest-registrations:permissions:update': '/direct-guest-links/registrations/:registrationId/permissions/update',
+  'direct-guest-registrations:chat-offer': '/direct-guest-links/registrations/:registrationId/chat-offer',
+  'direct-guest-registrations:chat-end': '/direct-guest-links/registrations/:registrationId/chat-end',
+  'direct-guest-chat-offers:accept': '/direct-guest-links/chat-offers/:eventId/accept',
+  'direct-guest-chat-offers:decline': '/direct-guest-links/chat-offers/:eventId/decline',
   'direct-guest-registrations:revoke': '/direct-guest-links/registrations/:registrationId/revoke',
   'direct-guest-registrations:delete': '/direct-guest-links/registrations/:registrationId/delete',
   'server-admin:admins:grant': '/server-admin/admins/grant',
@@ -56,6 +60,8 @@ export function accessResource(type: string, path: string, payload: any, identit
     key = ['user-access', params.identityId];
   } else if (type.startsWith('direct-guest-registrations:')) {
     key = ['guest-access', identityId, params.registrationId];
+  } else if (type.startsWith('direct-guest-chat-offers:')) {
+    key = ['guest-chat-offer', identityId, params.eventId];
   } else if (type.startsWith('server-admin:admins:')) {
     // Grant targets identity, revoke targets grant ID. One registry version covers both,
     // including requests sent by administrators from different carrier Circles.

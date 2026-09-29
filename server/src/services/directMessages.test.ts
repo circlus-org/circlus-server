@@ -9,7 +9,12 @@ jest.mock('../db/repositories', () => ({
     getDirectCurrentEpoch: jest.fn(),
     findDirectEpochKey: jest.fn(),
     getSyncState: jest.fn(),
-    fetchStatusUpdatesForSync: jest.fn()
+    fetchStatusUpdatesForSync: jest.fn(),
+    fetchMessagesForReadProof: jest.fn(),
+    upsertReadCursor: jest.fn(),
+    fetchUnreadMessagesFromUpTo: jest.fn(),
+    updateStatus: jest.fn(),
+    recordReadProof: jest.fn()
   },
   directGuestRegistrationRepository: { touchLastSeen: jest.fn() },
 }));
@@ -43,7 +48,7 @@ import { identityRepository, messageRepository } from '../db/repositories';
 import { sendIncomingMessagePush } from '../utils/push';
 import { sendDirectChatWsEvent } from '../ws/wsGateway';
 import { resolveDirectCommunicationAccess } from './directGuestAccessService';
-import { editDirectMessage, fetchDirectMessageStatusSync, sendDirectMessage } from './directMessages';
+import { editDirectMessage, fetchDirectMessageStatusSync, markDirectMessagesRead, sendDirectMessage } from './directMessages';
 import { configService } from './configService';
 
 describe('direct message idempotency', () => {
@@ -182,5 +187,68 @@ describe('stale direct-message edits', () => {
     (verifySignedRequest as jest.Mock).mockReturnValue(false);
     await expect(edit()).rejects.toMatchObject({status: 400, code: 'INVALID_REQUEST'});
     expect(messageRepository.editMessage).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('signed direct-message read confirmations', () => {
+  const proof = {
+    receipt: {
+      type: 'msg:read-receipt', signerId: 'recipient', timestamp: Date.now(), nonce: 'nonce', signature: 'signature',
+      payload: { version: 1, purpose: 'direct-message-read-v1', readTimeVisible: true, senderIdentityId: 'sender',
+        recipientIdentityId: 'recipient', recipientDeviceId: 'device', serverMessageIds: ['visible'] }
+    }
+  } as const;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (verifySignedRequest as jest.Mock).mockReturnValue(true);
+    (messageRepository.fetchMessagesForReadProof as jest.Mock).mockResolvedValue([
+      { server_message_id: 'visible', created_at: proof.receipt.timestamp - 1000 }
+    ]);
+    (messageRepository.fetchUnreadMessagesFromUpTo as jest.Mock).mockResolvedValue([
+      { server_message_id: 'visible', created_at: proof.receipt.timestamp - 1000 },
+      { server_message_id: 'unseen', created_at: proof.receipt.timestamp - 2000 }
+    ]);
+    (messageRepository.recordReadProof as jest.Mock).mockResolvedValue(true);
+  });
+
+  it('rejects a time-bearing receipt when presence is hidden without changing read state', async () => {
+    (identityRepository.findByIdentityId as jest.Mock).mockResolvedValue({
+      public_key_algorithm: 'ed25519', public_key_value: 'key', presence_visible: false
+    });
+    await expect(markDirectMessagesRead({
+      familyId: 'circle', identityId: 'recipient', deviceId: 'device', peerIdentityId: 'sender',
+      readThrough: proof.receipt.timestamp, readProof: proof
+    })).rejects.toMatchObject({ status: 409, code: 'INVALID_STATE', message: 'READ_TIME_HIDDEN' });
+    expect(messageRepository.upsertReadCursor).not.toHaveBeenCalled();
+    expect(messageRepository.recordReadProof).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('sends signed proof only to the message sender when presence visibility is %s', async (presenceVisible) => {
+    (identityRepository.findByIdentityId as jest.Mock).mockResolvedValue({
+      public_key_algorithm: 'ed25519', public_key_value: 'key', presence_visible: presenceVisible
+    });
+    const requestProof = { receipt: { ...proof.receipt, payload: {
+      ...proof.receipt.payload, readTimeVisible: presenceVisible
+    } } };
+    const result = await markDirectMessagesRead({
+      familyId: 'circle', identityId: 'recipient', deviceId: 'device', peerIdentityId: 'sender',
+      readThrough: proof.receipt.timestamp, readProof: requestProof
+    });
+
+    expect(result.statusUpdates.find((update) => update.serverMessageId === 'unseen')?.readProof).toBeUndefined();
+    expect(result.statusUpdates.find((update) => update.serverMessageId === 'unseen')?.serverTimestamp)
+      .toBe(proof.receipt.timestamp - 2000);
+    expect(messageRepository.recordReadProof).toHaveBeenCalledTimes(1);
+    expect(result.statusUpdates.find((update) => update.serverMessageId === 'visible')?.readProof).toEqual(requestProof);
+    expect(result.statusUpdates.find((update) => update.serverMessageId === 'visible')?.serverTimestamp)
+      .toEqual(presenceVisible ? expect.any(Number) : proof.receipt.timestamp);
+    const receiptEvents = (sendDirectChatWsEvent as jest.Mock).mock.calls.filter(
+      ([, , , event]) => event.type === 'message:status-update' && event.data.readProof
+    );
+    expect(receiptEvents).toHaveLength(1);
+    expect(receiptEvents[0][0]).toBe('circle');
+    expect(receiptEvents[0][1]).toBe('sender');
   });
 });

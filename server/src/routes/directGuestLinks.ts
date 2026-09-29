@@ -18,6 +18,7 @@ import { attachmentStorageService } from '../services/attachmentStorageService';
 import type { ApiResponse, ErrorCode } from '../../../shared/types';
 import type { TenancyRequest } from '../middleware/tenancy';
 import directGuestRegistrationRoutes from './directGuestRegistrationRoutes';
+import directGuestChatOfferRoutes from './directGuestChatOfferRoutes';
 import {
   canUseGuestServerAttachments,
   requireGuestLinkCreationAccess,
@@ -693,4 +694,5 @@ router.post('/:linkId/delete', verifySignature, requireActiveIdentity, async (re
 });
 
 router.use(directGuestRegistrationRoutes);
+router.use(directGuestChatOfferRoutes);
 export default router;
