@@ -33,7 +33,7 @@ import {
   IdentityDeletionServiceError
 } from '../services/identityDeletionService';
 import { listCircleIdentityAdmissionProofs } from '../services/circleMembershipProofService';
-import { listCircleMembershipStates } from '../services/circleMembershipStateService';
+import { listCircleMembershipStates, membershipStatesAfter } from '../services/circleMembershipStateService';
 import { setCircleInvitePermission } from '../services/circleInvitePermissionService';
 import { setCircleMemberStatus } from '../services/circleMembershipAdminService';
 import { notifyCircleDirectoryChanged } from '../services/circleDirectoryNotificationService';
@@ -105,7 +105,7 @@ router.post(
         } as ApiResponse);
       }
 
-      const [users, membershipProofs, membershipStates, inviteSummaries, guestCounts] = await Promise.all([
+      const [users, membershipProofs, allMembershipStates, inviteSummaries, guestCounts] = await Promise.all([
         identityRepository.findAll(familyId),
         listCircleIdentityAdmissionProofs(familyId),
         listCircleMembershipStates(familyId),
@@ -149,6 +149,14 @@ router.post(
           [familyId]
         ),
       ]);
+      // Like `/circle-membership/state`: the tail after the client's stored head,
+      // or the chain from the snapshot its checkpoint anchors.
+      const loadFrom = getSignedPayload<{ since?: unknown; anchorSequence?: unknown }>(req);
+      const { states: membershipStates, statesAfterSequence, statesFromSnapshotSequence } = membershipStatesAfter(
+        allMembershipStates,
+        loadFrom?.since,
+        loadFrom?.anchorSequence
+      );
       const inviteSummaryByCreator = new Map(inviteSummaries.rows.map((summary) => [summary.created_by, summary]));
       const guestCountByHost = new Map(guestCounts.rows.map((entry) => [entry.host_identity_id, Number(entry.active_guest_count || '0')]));
 
@@ -182,6 +190,8 @@ router.post(
           })),
           membershipProofs,
           membershipStates,
+          statesAfterSequence,
+          statesFromSnapshotSequence,
         }
       } as ApiResponse);
 

@@ -244,6 +244,12 @@ const messageArchiveJsonParser = express.json({
 const vaultJsonLimit = runtimeConfig.http.jsonBodyLimits.vault;
 const vaultJsonParser = express.json({ limit: vaultJsonLimit });
 logger.info('http_vault_json_limit_configured', { limit: vaultJsonLimit });
+if (runtimeConfig.circleMigration.testPrivateEndpointHosts.length > 0) {
+  // Disables the SSRF block for these hostnames; only for isolated test networks.
+  logger.warn('circle_migration_test_private_endpoint_hosts_enabled', {
+    hosts: runtimeConfig.circleMigration.testPrivateEndpointHosts
+  });
+}
 app.use((req, res, next) => {
   const path = req.path || req.url || '';
   if (path.startsWith('/api/identities/avatar')) return avatarJsonParser(req, res, next);

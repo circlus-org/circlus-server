@@ -12,7 +12,8 @@ creates local files ignored by Git and the Docker build context:
 - `deploy/secrets/ice-s2s.secret`;
 - `deploy/secrets/ice-subject-id.secret`;
 - `deploy/secrets/turn-local.secret`;
-- `deploy/secrets/push-config-encryption.secret`.
+- `deploy/secrets/push-config-encryption.secret`;
+- `deploy/secrets/circle-migration.secret`.
 
 The script also generates `VPS_ID`, `POSTGRES_PASSWORD`, and
 `MOBILE_CALL_ACTION_SECRET` in `deploy/.env` when empty, and defaults
@@ -289,7 +290,8 @@ At minimum, back up:
 - PostgreSQL data;
 - `deploy/.env`, `deploy/ice/turn-clusters.json`, and `deploy/secrets/`,
   including `push-config-encryption.secret` needed to decrypt managed push
-  credentials;
+  credentials and `circle-migration.secret` needed to finish a Circle move
+  that is in progress;
 - the Docker `server_data` volume, which contains encrypted attachments, public
   site assets, generated sites, and local Circle migration packages;
 - reverse proxy configuration;

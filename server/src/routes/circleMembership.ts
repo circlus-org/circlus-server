@@ -22,6 +22,7 @@ import { listCircleIdentityAdmissionProofs } from '../services/circleMembershipP
 import {
   appendCircleMembershipState,
   listCircleMembershipStates,
+  membershipStatesAfter,
 } from '../services/circleMembershipStateService';
 import { routeLogger } from '../utils/routeLogger';
 import { verifySignedRequest } from '../utils/crypto';
@@ -100,11 +101,20 @@ router.post('/state', verifySignature, requireActiveIdentity, async (req: AuthRe
     if (!req.familyId) {
       return res.status(500).json({ status: 'error', error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' } } as ApiResponse);
     }
-    const [states, membershipProofs] = await Promise.all([
+    const [allStates, membershipProofs] = await Promise.all([
       listCircleMembershipStates(req.familyId),
       listCircleIdentityAdmissionProofs(req.familyId),
     ]);
-    return res.json({ status: 'ok', result: { states, membershipProofs, atomicAdminMembershipTransitions: true } } as ApiResponse);
+    const loadFrom = getSignedPayload<{ since?: unknown; anchorSequence?: unknown }>(req);
+    const { states, statesAfterSequence, statesFromSnapshotSequence } = membershipStatesAfter(
+      allStates,
+      loadFrom?.since,
+      loadFrom?.anchorSequence
+    );
+    return res.json({
+      status: 'ok',
+      result: { states, statesAfterSequence, statesFromSnapshotSequence, membershipProofs, atomicAdminMembershipTransitions: true },
+    } as ApiResponse);
   } catch (error) {
     routeLogger.error('Circle membership state load error:', error);
     return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Unable to load Circle membership state' } } as ApiResponse);
@@ -116,17 +126,25 @@ router.post('/directory', rlDirectoryIp, verifySignature, requireActiveIdentity,
     if (!req.familyId) {
       return res.status(500).json({ status: 'error', error: { code: 'MISSING_FAMILY_ID', message: 'Family context not set' } } as ApiResponse);
     }
-    const [membershipProofs, membershipStates] = await Promise.all([
+    const [membershipProofs, allStates] = await Promise.all([
       listCircleIdentityAdmissionProofs(req.familyId),
       listCircleMembershipStates(req.familyId),
     ]);
+    const loadFrom = getSignedPayload<{ since?: unknown; anchorSequence?: unknown }>(req);
+    const { states: membershipStates, statesAfterSequence, statesFromSnapshotSequence } = membershipStatesAfter(
+      allStates,
+      loadFrom?.since,
+      loadFrom?.anchorSequence
+    );
     const members = membershipProofs
       .filter((proof) => proof.status === 'active' && proof.role !== 'guest')
       .map((proof) => ({ identityId: proof.identityId, publicKey: proof.publicKey }));
     return res.json({
       status: 'ok',
-      result: { members, membershipProofs, membershipStates },
+      result: { members, membershipProofs, membershipStates, statesAfterSequence, statesFromSnapshotSequence },
     } as ApiResponse<{
+      statesAfterSequence: number | null;
+      statesFromSnapshotSequence: number | null;
       members: Array<{ identityId: string; publicKey: PublicKey }>;
       membershipProofs: Awaited<ReturnType<typeof listCircleIdentityAdmissionProofs>>;
       membershipStates: Awaited<ReturnType<typeof listCircleMembershipStates>>;
@@ -637,6 +655,8 @@ router.post('/state/append', verifySignature, requireActiveIdentity, async (req:
       || !(
         record.claim.payload.action === 'genesis'
         || record.claim.payload.action === 'repair'
+        // Owner-signed and content-checked by the transition validation; it changes no membership.
+        || record.claim.payload.action === 'snapshot'
         || (record.claim.payload.action === 'remove'
           && record.claim.signerId === record.claim.payload.subjectIdentityId)
       )

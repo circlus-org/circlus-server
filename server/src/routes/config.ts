@@ -72,7 +72,7 @@ const rlCapabilities = createRateLimiter({
 });
 
 const SERVER_VERSION = String((serverPackage as { version?: string }).version || '0.0.0');
-const SERVER_API_LEVEL = 2;
+const SERVER_API_LEVEL = 3;
 
 /** Lightweight tenant/lifecycle probe used by foreground supervisors. */
 router.get('/lifecycle', rlCapabilities, async (req: TenancyRequest, res) => {

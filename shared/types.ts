@@ -691,7 +691,8 @@ export type CircleMembershipAction =
   | 'remove'
   | 'restore'
   | 'transfer_owner'
-  | 'set_invite_permission';
+  | 'set_invite_permission'
+  | 'snapshot';
 
 export interface CircleMembershipPermissions {
   canCreateInvites: boolean;
@@ -721,9 +722,29 @@ export interface CircleMembershipStatePayload {
   action: CircleMembershipAction;
   subjectIdentityId: IdentityId | null;
   issuedAt: ISODateString;
+  /**
+   * Genesis only: the complete chain of the Circle this one continues (after a
+   * server migration). It proves that the genesis owner legitimately owns the
+   * Circle when ownership was transferred away from the admission root.
+   */
+  predecessor?: CircleMembershipPredecessor;
+  /** Snapshot only: what verifiers would otherwise derive from the history before it. */
+  snapshot?: import('./circleMembershipSnapshot').CircleMembershipSnapshot;
+}
+
+export interface CircleMembershipPredecessor {
+  version: 1;
+  states: CircleMembershipStateRecord[];
 }
 
 export type CircleMembershipStateClaim = SignedRequest<CircleMembershipStatePayload, string>;
+
+export interface CircleMembershipPredecessorCapture {
+  /** CircleKey (`vpsId + circleId`) of the source Circle the chain belongs to. */
+  circleKey: string;
+  states: CircleMembershipStateRecord[];
+  capturedAt: ISODateString;
+}
 
 export interface CircleMembershipStateRecord {
   claim: CircleMembershipStateClaim;
@@ -841,6 +862,22 @@ export interface CircleMembershipTrustCheckpoint {
   /** SHA-256 commitment to the canonical signed membership-state claim. */
   stateHash?: string;
   conflicted?: boolean;
+  /** Circle (`vpsId + circleId`) whose chain this checkpoint covers. Absent on legacy records. */
+  circleKey?: string;
+  /** Increments only after an owner-signed Circle migration moved this identity to a new chain. */
+  generation?: number;
+  /**
+   * Owner named by this verified head. A participant trusts an owner-signed
+   * Circle move with this key even without the owner in its contacts.
+   */
+  ownerIdentityId?: IdentityId;
+  ownerPublicKey?: PublicKey;
+  /**
+   * Heads of the chains this Circle continues after server moves, one per
+   * earlier Circle (circleKey). A destination genesis whose embedded source
+   * chain lacks one of these heads is a rollback.
+   */
+  previous?: CircleMembershipTrustCheckpoint[];
 }
 
 /* =========================
@@ -1013,6 +1050,13 @@ export interface VaultDeviceEntry {
   updatedAt: ISODateString;
 }
 
+export interface VaultRevokedDevice {
+  publicKey: PublicKey;
+  encryptionPublicKey?: PublicKey;
+  /** When this user's devices first saw the revocation. */
+  recordedAt: ISODateString;
+}
+
 export interface VaultDeviceLabelEntry {
   label: string;
   updatedAt: ISODateString;
@@ -1064,6 +1108,18 @@ export interface VaultData {
   messageRevisionTrust?: Record<string, MessageRevisionTrustRecord>;
   /** Highest authenticated Circle membership head observed by this identity. */
   circleMembershipTrust?: Record<IdentityId, CircleMembershipTrustCheckpoint>;
+  /**
+   * Source Circle membership chain captured by the owner before a server
+   * migration stops the Circle. The destination genesis embeds it as its
+   * predecessor; removed once that genesis has been accepted.
+   */
+  circleMembershipPredecessors?: Record<IdentityId, CircleMembershipPredecessorCapture>;
+  /**
+   * Devices of the user's own identities that a server reported as revoked.
+   * Never removed by a merge: a recovered Circle must refuse these keys even
+   * if a stolen device that missed the revocation tries to register again.
+   */
+  revokedDevices?: Record<IdentityId, Record<DeviceId, VaultRevokedDevice>>;
   // Server registration dates (for determining primary server per contact)
   /** Keyed by encoded CircleKey (`vpsId + circleId`). */
   serverRegistrations?: Record<string, ISODateString>;
@@ -1237,7 +1293,8 @@ export type ServerFeatureKey =
   | 'tenantOwnerClaims'
   | 'publicCircleSite'
   | 'memberRemoval'
-  | 'platformRecoveryV1';
+  | 'platformRecoveryV1'
+  | 'membershipSnapshots';
 
 export interface ServerCapabilitiesResponse {
   circleId: CircleId;
@@ -1573,6 +1630,7 @@ export type WSMessageType =
   | 'file-transfer:rejected'
   | 'file-transfer:ice-candidate'
   | 'file-transfer:bootstrap'
+  | 'file-transfer:sync-pending'
   | 'file-transfer:renotify'
   | 'file-transfer:complete'
   | 'file-transfer:completed'

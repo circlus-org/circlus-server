@@ -78,12 +78,14 @@ export type DirectFileTransferSignalingDependencies = {
   }) => Promise<void>;
   now?: () => number;
   sessionTtlMs?: number;
+  transferTtlMs?: number;
   registry?: DirectFileTransferSessionRegistry;
 };
 
 export class DirectFileTransferSignalingService {
   private readonly now: () => number;
   private readonly sessionTtlMs: number;
+  private readonly transferTtlMs: number;
   hasIdentity(familyId: string, identityId: string): boolean { return this.registry.hasIdentity(familyId, identityId); }
 
   hasSocket(ws: WebSocket): boolean { return this.registry.hasSocket(ws); }
@@ -93,12 +95,23 @@ export class DirectFileTransferSignalingService {
   constructor(private readonly dependencies: DirectFileTransferSignalingDependencies) {
     this.now = dependencies.now || Date.now;
     this.sessionTtlMs = Math.max(1_000, dependencies.sessionTtlMs || 10 * 60 * 1000);
+    this.transferTtlMs = Math.max(1_000, dependencies.transferTtlMs || 30 * 60 * 1000);
     this.registry = dependencies.registry || new DirectFileTransferSessionRegistry({
       now: this.now,
       onExpire: (session) => {
         this.sendEnded(session.initiatorWs, session.incomingData.sessionId, 'session_expired');
-        if (session.targetWs) {
-          this.sendEnded(session.targetWs, session.incomingData.sessionId, 'session_expired');
+        const targetSockets = session.targetWs
+          ? [session.targetWs]
+          : session.targetDeviceIds?.length
+            ? session.targetDeviceIds.flatMap((deviceId) => [...(this.dependencies.getDeviceSockets(deviceId) || [])])
+            : session.targetDeviceId
+              ? [...(this.dependencies.getDeviceSockets(session.targetDeviceId) || [])]
+              : [...(this.dependencies.getIdentitySockets(session.familyId, session.targetIdentityId) || [])];
+        for (const targetWs of new Set(targetSockets)) {
+          const targetInfo = this.dependencies.getConnectionInfo(targetWs);
+          if (targetWs !== session.initiatorWs && targetInfo && this.matchesTargetDevice(session, targetInfo)) {
+            this.sendEnded(targetWs, session.incomingData.sessionId, 'session_expired');
+          }
         }
         void this.notifyTargetIdentityResolution(session, 'expired');
       }
@@ -336,6 +349,14 @@ export class DirectFileTransferSignalingService {
     this.sendIncoming(ws, session.incomingDataByDevice?.[info.deviceId] || session.incomingData);
   }
 
+  handleSyncPending(ws: WebSocket): void {
+    const info = this.requireConnection(ws);
+    if (!info || this.rejectTemporary(ws, info)) return;
+    for (const session of this.registry.pendingForTarget(info.familyId, info.identityId, info.deviceId)) {
+      this.sendIncoming(ws, session.incomingDataByDevice?.[info.deviceId] || session.incomingData);
+    }
+  }
+
   async handleRenotify(ws: WebSocket, data: WSDirectFileTransferBootstrapData): Promise<void> {
     const info = this.requireConnection(ws);
     if (!info || this.rejectTemporary(ws, info)) return;
@@ -425,6 +446,9 @@ export class DirectFileTransferSignalingService {
       return;
     }
     this.registry.bindTarget(sessionId, ws);
+    // Acceptance starts a separate transfer window; waiting for the receiver
+    // must not consume the time available to transmit the file.
+    this.registry.extend(sessionId, this.now() + this.transferTtlMs);
     this.dependencies.sendMessage(session.initiatorWs, {
       type: 'file-transfer:accepted',
       data: {

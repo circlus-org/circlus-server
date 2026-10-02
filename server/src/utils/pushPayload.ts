@@ -69,9 +69,12 @@ const USER_VISIBLE_MOBILE_PAYLOAD_TYPES = new Set<PushPayload['type']>([
 ]);
 
 export function mobileDeliveryClassForPayload(
-  payload: Pick<PushPayload, 'type'>
+  payload: Pick<PushPayload, 'type' | 'callStatus'>
 ): MobileDeliveryClass {
   if (payload.type === 'incoming_call') return 'call';
+  // A missed call must be shown even when iOS would hold back a background push
+  // or the app was force-quit. Ended and answered-elsewhere stay silent.
+  if (payload.type === 'call_status' && payload.callStatus === 'missed') return 'notification';
   return USER_VISIBLE_MOBILE_PAYLOAD_TYPES.has(payload.type)
     ? 'notification'
     : 'background';

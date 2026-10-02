@@ -107,6 +107,7 @@ generate_secret_if_missing "$secrets_dir/ice-s2s.secret"
 generate_secret_if_missing "$secrets_dir/ice-subject-id.secret"
 generate_secret_if_missing "$secrets_dir/turn-local.secret"
 generate_secret_if_missing "$secrets_dir/push-config-encryption.secret"
+generate_secret_if_missing "$secrets_dir/circle-migration.secret"
 
 # Compose file-backed secrets keep host ownership and mode. Grant coturn the
 # file's group instead of running it as root or exposing the secret to everyone.

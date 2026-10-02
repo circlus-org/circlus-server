@@ -85,7 +85,7 @@ describe('GET /capabilities: public circle site eligibility', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({
-          apiLevel: 2,
+          apiLevel: 3,
           enabled: { platformRecoveryV1: false },
           canonical: expect.objectContaining({ publicSiteEligible: true, publicSiteEnabled: true }),
         }),

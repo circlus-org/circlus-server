@@ -158,6 +158,59 @@ describe('DirectFileTransferSignalingService device routing', () => {
     expect(registry.get('different-session')).toBeUndefined();
   });
 
+  it('replays a pending request only to its addressed device and never after acceptance', () => {
+    service.handleSyncPending(otherReceiverDevice);
+    expect(messages).toEqual([]);
+    service.handleSyncPending(receiver);
+    expect(messages).toEqual([expect.objectContaining({
+      ws: receiver,
+      message: expect.objectContaining({ type: 'file-transfer:incoming', data: expect.objectContaining({ sessionId: 'session' }) })
+    })]);
+    messages.length = 0;
+    service.handleAccept(receiver, { sessionId: 'session', answer: { type: 'answer', sdp: 'sdp' } });
+    messages.length = 0;
+    service.handleSyncPending(receiverSecondTab);
+    expect(messages).toEqual([]);
+  });
+
+  it('starts the transfer timeout when the recipient accepts, after the ten-minute request window began', async () => {
+    let now = 1_000;
+    const routes = new DirectFileTransferSessionRegistry({
+      now: () => now,
+      setTimer: () => ({ unref() {} }) as unknown as NodeJS.Timeout,
+      clearTimer: () => {}
+    });
+    const timedService = new DirectFileTransferSignalingService({
+      registry: routes,
+      now: () => now,
+      getConnectionInfo: (ws) => info.get(ws),
+      getIdentitySockets: () => undefined,
+      getDeviceSockets: () => undefined,
+      sendMessage: (ws, message) => messages.push({ ws, message }),
+      sendError: (ws, code) => errors.push({ ws, code }),
+      resolvePublishedIdentityName: async () => 'Sender',
+      resolveAccess: async () => ({ allowed: true, relation: 'circle_member' }) as any,
+      findIdentity: async () => ({ identity_id: 'sender', status: 'active' }) as any,
+      wakeTargetIdentity: async () => {},
+      notifyTargetIdentityResolution: async () => {}
+    });
+    await timedService.handleOffer(sender, {
+      sessionId: 'late-acceptance',
+      targetIdentityId: 'receiver',
+      metadata: { fileName: 'file.bin', size: 10, mimeType: 'application/octet-stream' },
+      offer: { type: 'offer', sdp: 'sdp' }
+    });
+    const offerDeadline = routes.get('late-acceptance')!.expiresAt;
+    now += 9 * 60 * 1000;
+    timedService.handleAccept(receiver, { sessionId: 'late-acceptance', answer: { type: 'answer', sdp: 'sdp' } });
+    expect(routes.get('late-acceptance')!.expiresAt).toBe(now + 30 * 60 * 1000);
+    expect(routes.get('late-acceptance')!.expiresAt).toBeGreaterThan(offerDeadline);
+    now = offerDeadline + 1;
+    expect(routes.get('late-acceptance')).toBeDefined();
+    now += 29 * 60 * 1000;
+    expect(routes.get('late-acceptance')).toBeUndefined();
+  });
+
   it('allows a native receiver to bootstrap only its registered session', () => {
     service.handleBootstrap(nativeReceiver, { sessionId: 'session' });
     expect(messages.at(-1)?.ws).toBe(nativeReceiver);

@@ -83,16 +83,20 @@ export class DirectFileTransferSessionRegistry {
       pendingInitiatorCandidates: [],
       pendingTargetCandidates: new Map()
     });
+    this.scheduleExpiry(sessionId, params.expiresAt);
+    return true;
+  }
+
+  private scheduleExpiry(sessionId: DirectFileTransferSessionId, expiresAt: number): void {
     const timer = this.setTimer(() => {
       const current = this.sessions.get(sessionId);
       if (current && current.expiresAt <= this.now()) {
         const expired = this.remove(sessionId);
         if (expired) this.onExpire?.(expired);
       }
-    }, Math.max(1, params.expiresAt - this.now()));
+    }, Math.max(1, expiresAt - this.now()));
     timer.unref?.();
     this.expiryTimers.set(sessionId, timer);
-    return true;
   }
 
   get(sessionId: DirectFileTransferSessionId): DirectFileTransferSession | undefined {
@@ -103,6 +107,30 @@ export class DirectFileTransferSessionRegistry {
       if (expired) this.onExpire?.(expired);
       return undefined;
     }
+    return snapshot(session);
+  }
+
+  pendingForTarget(familyId: string, identityId: IdentityId, deviceId: DeviceId): DirectFileTransferSession[] {
+    const pending: DirectFileTransferSession[] = [];
+    for (const sessionId of [...this.sessions.keys()]) {
+      const session = this.get(sessionId);
+      if (session && !session.targetWs && session.familyId === familyId
+        && session.targetIdentityId === identityId
+        && (session.targetDeviceIds?.includes(deviceId)
+          || (!session.targetDeviceIds && (!session.targetDeviceId || session.targetDeviceId === deviceId)))) {
+        pending.push(session);
+      }
+    }
+    return pending;
+  }
+
+  extend(sessionId: DirectFileTransferSessionId, expiresAt: number): DirectFileTransferSession | undefined {
+    if (!this.get(sessionId)) return undefined;
+    const session = this.sessions.get(sessionId)!;
+    session.expiresAt = expiresAt;
+    const previousTimer = this.expiryTimers.get(sessionId);
+    if (previousTimer) this.clearTimer(previousTimer);
+    this.scheduleExpiry(sessionId, expiresAt);
     return snapshot(session);
   }
 

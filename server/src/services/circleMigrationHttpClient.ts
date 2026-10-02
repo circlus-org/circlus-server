@@ -42,7 +42,11 @@ async function resolvePinnedAddress(url: URL): Promise<{ address: string; family
     return { address: hostname, family: literalFamily };
   }
   const addresses = await lookup(hostname, { all: true, verbatim: true });
-  if (addresses.length === 0 || addresses.some((entry) => isBlockedIpAddress(entry.address))) {
+  // Only an explicitly configured test hostname may resolve privately (see
+  // CIRCLE_MIGRATION_TEST_PRIVATE_ENDPOINT_HOSTS); literal IPs never qualify.
+  const privateAllowed = getCircleMigrationRuntimeConfig().testPrivateEndpointHosts
+    .includes(hostname.toLowerCase());
+  if (addresses.length === 0 || (!privateAllowed && addresses.some((entry) => isBlockedIpAddress(entry.address)))) {
     throw new Error('Migration service endpoint resolves to a private address');
   }
   const selected = addresses[0]!;

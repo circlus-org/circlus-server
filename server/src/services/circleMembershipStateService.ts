@@ -1,4 +1,10 @@
 import type { PoolClient } from 'pg';
+import {
+  computeCircleMembershipSnapshot,
+  flattenCircleMembershipHistory,
+  latestSnapshotIssuedAt,
+  sameCircleMembershipSnapshot,
+} from '../../../shared/circleMembershipSnapshot';
 import { createHash } from 'node:crypto';
 import type {
   CircleIdentityAdmissionProof,
@@ -48,6 +54,16 @@ function sameEntry(left: CircleMembershipEntry | undefined, right: CircleMembers
     equivalentExceptInvitePermission(left, right)
     && canCreateInvites(left) === canCreateInvites(right)
   );
+}
+
+function latestSnapshotInviteUse(history: CircleMembershipStateRecord[], capabilityId: string) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const snapshot = history[index]!.claim.payload.snapshot;
+    if (history[index]!.claim.payload.action === 'snapshot' && snapshot) {
+      return snapshot.inviteUses.find((use) => use.capabilityId === capabilityId) || null;
+    }
+  }
+  return null;
 }
 
 function replaysCircleInviteClaim(
@@ -159,11 +175,28 @@ export function validateCircleMembershipStateTransition(params: {
   const owner = oldById.get(previous.payload.ownerIdentityId);
   if (!owner) return { ok: false, message: 'Previous Circle owner is missing' };
 
+  // Includes the chains a migrated genesis carries and any earlier snapshot.
+  const history = flattenCircleMembershipHistory(params.history || []);
+
   if (payload.action === 'add') {
-    const replayedCapability = replaysCircleInviteClaim(record, params.history || []);
-    const previouslyAdmittedIdentity = Boolean(added[0] && (params.history || []).some((state) => (
-      state.claim.payload.members.some((entry) => entry.identityId === added[0]!.identityId)
-    )));
+    const replayedCapability = replaysCircleInviteClaim(record, history);
+    const previouslyAdmittedIdentity = Boolean(added[0] && (
+      history.some((state) => state.claim.payload.members.some((entry) => entry.identityId === added[0]!.identityId))
+      || history.some((state) => state.claim.payload.snapshot?.formerIdentityIds.includes(added[0]!.identityId))
+    ));
+    // After a snapshot, uses of invitations already expired by then are no longer
+    // recorded, so such an invitation must not admit anyone again.
+    const snapshotIssuedAt = latestSnapshotIssuedAt(history);
+    const expiredBeforeSnapshot = Boolean(snapshotIssuedAt && record.admission?.kind === 'circle_invite'
+      && Date.parse(record.admission.descriptor.payload.expiresAt) <= Date.parse(snapshotIssuedAt));
+    const snapshotUse = record.admission?.kind === 'circle_invite'
+      ? latestSnapshotInviteUse(history, record.admission.capabilityId)
+      : null;
+    const replayedSnapshotUse = Boolean(snapshotUse && record.admission?.kind === 'circle_invite' && (
+      snapshotUse.mode !== 'unlimited'
+      || snapshotUse.descriptorSignature !== record.admission.descriptor.signature
+      || snapshotUse.claimIds.includes(String(record.admission.claim.capabilityProof.payload.claimId || '').trim())
+    ));
     const unchanged = previous.payload.members.every((entry) => sameEntry(nextById.get(entry.identityId), entry));
     const valid = added.length === 1
       && removed.length === 0
@@ -171,6 +204,8 @@ export function validateCircleMembershipStateTransition(params: {
       && payload.ownerIdentityId === previous.payload.ownerIdentityId
       && payload.subjectIdentityId === added[0]!.identityId
       && !replayedCapability
+      && !replayedSnapshotUse
+      && !expiredBeforeSnapshot
       && !previouslyAdmittedIdentity
       && validateAddAuthorization({ record, added: added[0]!, previous });
     return valid ? { ok: true } : { ok: false, message: 'Invalid Circle member addition' };
@@ -207,6 +242,17 @@ export function validateCircleMembershipStateTransition(params: {
       && sameKey(payload.members[0]!.publicKey, owner.publicKey)
       && removed.every((entry) => entry.identityId !== previous.payload.ownerIdentityId);
     return valid ? { ok: true } : { ok: false, message: 'Invalid Circle membership repair' };
+  }
+
+  if (payload.action === 'snapshot') {
+    const valid = added.length === 0
+      && removed.length === 0
+      && payload.ownerIdentityId === previous.payload.ownerIdentityId
+      && payload.subjectIdentityId === previous.payload.ownerIdentityId
+      && previous.payload.members.every((entry) => sameEntry(nextById.get(entry.identityId), entry))
+      && Boolean(payload.snapshot)
+      && sameCircleMembershipSnapshot(payload.snapshot, computeCircleMembershipSnapshot(history, payload.issuedAt));
+    return valid ? { ok: true } : { ok: false, message: 'Invalid Circle membership snapshot' };
   }
 
   if (payload.action === 'remove') {
@@ -278,6 +324,62 @@ export function validateCircleMembershipStateTransition(params: {
   }
 
   return { ok: false, message: 'Unsupported Circle membership action' };
+}
+
+/**
+ * The part of a chain a client still needs. A client that holds a verified
+ * chain up to `since` receives only the states after it; when `since` is not
+ * in this chain (fork, rollback or a foreign value) it receives everything,
+ * as before, and its own verification decides.
+ */
+export function membershipStatesAfter(
+  states: CircleMembershipStateRecord[],
+  since: unknown,
+  anchorSequence?: unknown
+): { states: CircleMembershipStateRecord[]; statesAfterSequence: number | null; statesFromSnapshotSequence: number | null } {
+  const tail = membershipStatesAfterPoint(states, since);
+  if (tail.statesAfterSequence !== null) return { ...tail, statesFromSnapshotSequence: null };
+  return { ...membershipStatesFromSnapshot(states, anchorSequence), statesAfterSequence: null };
+}
+
+/**
+ * For a client with a verified checkpoint but no stored chain: the chain from
+ * the latest snapshot at or before that checkpoint, which the checkpoint then
+ * anchors. Without such a snapshot, everything.
+ */
+function membershipStatesFromSnapshot(
+  states: CircleMembershipStateRecord[],
+  anchorSequence: unknown
+): { states: CircleMembershipStateRecord[]; statesFromSnapshotSequence: number | null } {
+  if (typeof anchorSequence !== 'number' || !Number.isSafeInteger(anchorSequence) || anchorSequence < 1) {
+    return { states, statesFromSnapshotSequence: null };
+  }
+  let snapshotIndex = -1;
+  states.forEach((state, index) => {
+    if (state.claim.payload.action === 'snapshot' && state.claim.payload.sequence <= anchorSequence) snapshotIndex = index;
+  });
+  if (snapshotIndex < 0) return { states, statesFromSnapshotSequence: null };
+  return { states: states.slice(snapshotIndex), statesFromSnapshotSequence: states[snapshotIndex]!.claim.payload.sequence };
+}
+
+function membershipStatesAfterPoint(
+  states: CircleMembershipStateRecord[],
+  since: unknown
+): { states: CircleMembershipStateRecord[]; statesAfterSequence: number | null } {
+  const point = since && typeof since === 'object' ? since as { sequence?: unknown; stateId?: unknown } : null;
+  const sequence = point?.sequence;
+  if (
+    typeof sequence !== 'number'
+    || !Number.isSafeInteger(sequence)
+    || sequence < 1
+    || typeof point?.stateId !== 'string'
+  ) return { states, statesAfterSequence: null };
+  const known = states.find((state) => state.claim.payload.sequence === sequence);
+  if (!known || known.claim.payload.stateId !== point.stateId) return { states, statesAfterSequence: null };
+  return {
+    states: states.filter((state) => state.claim.payload.sequence > sequence),
+    statesAfterSequence: sequence,
+  };
 }
 
 export async function listCircleMembershipStates(

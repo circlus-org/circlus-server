@@ -329,6 +329,27 @@ export class CallHistoryRepository {
     );
   }
 
+  async markRejectedAfterLateDecline(params: {
+    familyId: string;
+    callSessionId: CallSessionId;
+    declinedAt: number;
+  }): Promise<boolean> {
+    const result = await pool.query(
+      `UPDATE call_logs
+       SET final_status = 'rejected',
+           final_reason = 'mobile_declined',
+           ended_at = LEAST(ended_at, $3),
+           missed_seen_at = NULL,
+           last_updated_at = $4
+       WHERE family_id = $1 AND call_session_id = $2
+         AND final_status = 'missed' AND final_reason = 'no_answer'
+         AND connected_at IS NULL AND ended_at IS NOT NULL
+         AND $3::bigint BETWEEN created_at AND ended_at`,
+      [params.familyId, params.callSessionId, Math.floor(params.declinedAt), Date.now()]
+    );
+    return (result.rowCount || 0) > 0;
+  }
+
   async fetchHistoryForSync(params: {
     familyId: string;
     identityId: IdentityId;

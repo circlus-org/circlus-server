@@ -14,7 +14,8 @@ jest.mock('../middleware/auth', () => ({
 jest.mock('../services/circleMembershipProofService', () => ({ listCircleIdentityAdmissionProofs: jest.fn() }));
 jest.mock('../services/circleMembershipStateService', () => ({
   appendCircleMembershipState: jest.fn(),
-  listCircleMembershipStates: jest.fn()
+  listCircleMembershipStates: jest.fn(),
+  membershipStatesAfter: jest.requireActual('../services/circleMembershipStateService').membershipStatesAfter
 }));
 jest.mock('../services/circleDirectoryNotificationService', () => ({ notifyCircleDirectoryChanged: jest.fn() }));
 jest.mock('../utils/crypto', () => ({ verifySignedRequest: jest.fn(() => true) }));
@@ -143,13 +144,19 @@ describe('Circle membership route behavior', () => {
     expect(membershipStates).toHaveBeenCalledWith('family-1');
     expect(admissionProofs).toHaveBeenCalledWith('family-1');
     expect(res.json.mock.calls[0][0].result).toEqual({
-      states: [head], membershipProofs: [{ proofId: 'proof-1' }], atomicAdminMembershipTransitions: true
+      states: [head], statesAfterSequence: null, statesFromSnapshotSequence: null, membershipProofs: [{ proofId: 'proof-1' }], atomicAdminMembershipTransitions: true
     });
+
 
     const denied = response();
     await handler('/state')(request({}, { familyId: undefined }), denied);
     expect(denied.status).toHaveBeenCalledWith(500);
     expect(membershipStates).toHaveBeenCalledTimes(1);
+
+    // A client holding the chain up to its head receives only what follows.
+    const tail = response();
+    await handler('/state')(request({ since: { sequence: 1, stateId: 'state-1' } }), tail);
+    expect(tail.json.mock.calls[0][0].result).toMatchObject({ states: [], statesAfterSequence: 1 });
   });
 
   it('returns a membership directory without plaintext profile fields', async () => {
@@ -169,6 +176,8 @@ describe('Circle membership route behavior', () => {
       ],
       membershipProofs: proofs,
       membershipStates: [head],
+      statesAfterSequence: null,
+      statesFromSnapshotSequence: null,
     });
     expect(JSON.stringify(res.json.mock.calls[0][0])).not.toContain('identityName');
   });

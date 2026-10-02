@@ -16,8 +16,8 @@ encrypts data or handles keys.
 
 ## Requirements
 
-- A Linux VPS with Docker and Docker Compose. A 2 GB RAM VPS is a practical
-  starting point for a small Circle.
+- A Linux VPS with Docker and Docker Compose. Runtime memory use on a 1 GB
+  VPS has not yet been benchmarked; published images avoid compiling on the VPS.
 - A domain or subdomain pointing to the VPS for the first Circle.
 - TCP ports 80 and 443 for HTTPS; TCP and UDP port 3478 plus UDP ports
   49160–49200 for the default local TURN setup. Adjust these if you change the
@@ -28,6 +28,10 @@ The instructions below use Ubuntu or Debian for Nginx and Certbot. See
 and backups.
 
 ## Install with Docker Compose
+
+The steps below build the server images from source on the VPS. To install from
+published images instead, use the alternative command in step 2. Both methods
+use the same database, data volume, secrets, and later setup steps.
 
 1. Copy the deployment settings and set the public address for TURN. The Circle
    domain can also be used for TURN on port 3478.
@@ -49,6 +53,26 @@ and backups.
    ./deploy/init-local-turn.sh
    docker compose --env-file deploy/.env --profile local-turn up -d --build
    ```
+
+   **Alternative: published images.** Check out the public release tag you
+   intend to run, for example `git fetch --tags && git switch --detach v1.2.3`.
+   Set `CIRCLUS_IMAGE_TAG=v1.2.3` in `deploy/.env`, using that same published
+   tag, then run:
+
+   ```bash
+   ./deploy/init-local-turn.sh
+   docker compose --env-file deploy/.env -f compose.yaml -f compose.prebuilt.yaml \
+     --profile local-turn pull
+   docker compose --env-file deploy/.env -f compose.yaml -f compose.prebuilt.yaml \
+     --profile local-turn up -d --no-build
+   ```
+
+   This needs Docker Compose with `!reset` support. The published server and
+   ICE Config Service packages must be public in GHCR for anonymous pulls.
+   The Compose override removes all three source builds; `migrate` and `server`
+   use the same published server image. Continue with step 3. To use an image
+   from another registry, set `CIRCLUS_SERVER_IMAGE` and `CIRCLUS_ICE_IMAGE`
+   in `deploy/.env`.
 
    The initializer creates a stable `VPS_ID`, database password, ICE/TURN
    configuration, and secret files. It sets the TURN secret to mode `640` and
@@ -126,12 +150,25 @@ Also preserve `deploy/.env`, `deploy/secrets/`, and
 `deploy/ice/turn-clusters.json`. The database dump alone does not contain file
 attachments. See [backup instructions](deploy/README.md#backups).
 
-Then, from the repository root:
+For installations built from source, update from the repository root:
 
 ```bash
 git pull --ff-only
 ./deploy/init-local-turn.sh
 docker compose --env-file deploy/.env --profile local-turn up -d --build
+```
+
+For installations using published images, fetch and check out a new published
+release tag, set `CIRCLUS_IMAGE_TAG` in `deploy/.env` to that exact tag, and run:
+
+```bash
+git fetch --tags
+git switch --detach v1.2.4  # Replace with the new published release tag.
+./deploy/init-local-turn.sh
+docker compose --env-file deploy/.env -f compose.yaml -f compose.prebuilt.yaml \
+  --profile local-turn pull
+docker compose --env-file deploy/.env -f compose.yaml -f compose.prebuilt.yaml \
+  --profile local-turn up -d --no-build
 ```
 
 Keep the same Compose project name as the original installation. The

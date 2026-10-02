@@ -1038,12 +1038,13 @@ class CircleMigrationRepository {
          SELECT 'sev_migration_' || REPLACE(gen_random_uuid()::text, '-', ''),
                 $1::uuid,
                 identity_id,
-                $2,
+                $2::text,
                 'circle:migration:scheduled',
+                -- jsonb_build_object takes "any": untyped parameters cannot be inferred.
                 jsonb_build_object(
-                  'migrationId', $3,
+                  'migrationId', $3::text,
                   'scheduledAt', $4::text,
-                  'destinationPublicBaseUrl', $5
+                  'destinationPublicBaseUrl', $5::text
                 ),
                 $6::bigint
            FROM identities

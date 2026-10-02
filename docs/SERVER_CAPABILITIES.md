@@ -41,7 +41,7 @@ The compatibility-relevant part of the response has this shape:
       "circleMigration": 1,
       "deviceEnrollment": 2
     },
-    "apiLevel": 2,
+    "apiLevel": 3,
     "serverVersion": "1.0.0",
     "enabled": {},
     "limits": {
@@ -78,6 +78,11 @@ Rules:
 - later releases must not decrease the level;
 - `apiLevel` is not SemVer, a build number, or a database schema version;
 - a release without new client-visible capabilities keeps the existing level.
+
+Levels so far: 1 — the first public server; 2 — `memberRemoval`,
+`platformRecoveryV1`; 3 — `membershipSnapshots` (the server validates and
+stores owner-signed `snapshot` states in the Circle membership chain and
+accepts `since` on membership loads). Clients issue snapshots only on level 3.
 
 Increase the level when a newer client must distinguish a server that provides
 a capability from a server that does not. Internal refactoring, database

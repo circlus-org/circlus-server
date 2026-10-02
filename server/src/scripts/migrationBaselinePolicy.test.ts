@@ -43,7 +43,8 @@ describe('Public migration baseline adoption', () => {
         '011_encrypt_private_link_and_device_metadata.sql',
         '012_encrypt_channel_metadata_and_reaction_codes.sql',
         '013_call_handling_blocking_session.sql',
-        '014_direct_message_read_proof.sql'
+        '014_direct_message_read_proof.sql',
+        '015_circle_membership_snapshot_action.sql'
       ]);
     }
   });

@@ -5,7 +5,8 @@ jest.mock('./linkCapabilityService', () => ({ verifyCapabilityProof: jest.fn(() 
 import type { CircleMembershipStateRecord, PublicKey } from '@shared/types';
 import { createHash } from 'node:crypto';
 import { canonicalizeJson } from '@shared/signatureMessage';
-import { validateCircleMembershipStateTransition } from './circleMembershipStateService';
+import { membershipStatesAfter, validateCircleMembershipStateTransition } from './circleMembershipStateService';
+import { computeCircleMembershipSnapshot } from '@shared/circleMembershipSnapshot';
 
 const ownerKey = { algorithm: 'ed25519' as const, value: 'owner-key' };
 const memberKey = { algorithm: 'ed25519' as const, value: 'member-key' };
@@ -390,5 +391,80 @@ describe('Circle membership invite reuse', () => {
       previous: first.claim,
       history: [ownerOnlyGenesis, first],
     })).toEqual({ ok: false, message: 'Invalid Circle member addition' });
+  });
+});
+
+describe('membership states after a client checkpoint', () => {
+  const chain = [1, 2, 3].map((sequence) => ({
+    claim: { payload: { sequence, stateId: `cms_${sequence}` } },
+    admission: null,
+  })) as unknown as CircleMembershipStateRecord[];
+
+  it('returns only the states after a checkpoint that is in this chain', () => {
+    const result = membershipStatesAfter(chain, { sequence: 2, stateId: 'cms_2' });
+    expect(result.statesAfterSequence).toBe(2);
+    expect(result.states.map((state) => state.claim.payload.sequence)).toEqual([3]);
+    expect(membershipStatesAfter(chain, { sequence: 3, stateId: 'cms_3' }).states).toEqual([]);
+  });
+
+  it('returns the whole chain for a missing, foreign or malformed checkpoint', () => {
+    for (const since of [undefined, null, {}, { sequence: 2, stateId: 'cms_fork' }, { sequence: 9, stateId: 'cms_9' },
+      { sequence: 0, stateId: 'cms_0' }, { sequence: '2', stateId: 'cms_2' }, { sequence: 1.5, stateId: 'cms_1' }]) {
+      const result = membershipStatesAfter(chain, since);
+      expect(result.statesAfterSequence).toBeNull();
+      expect(result.statesFromSnapshotSequence).toBeNull();
+      expect(result.states).toBe(chain);
+    }
+  });
+});
+
+describe('Circle membership snapshots', () => {
+  const owner = members[1]!;
+  const ownerGenesis = record({
+    stateId: 'cms_genesis000000', sequence: 1, previousStateId: null, action: 'genesis', members: [owner],
+  });
+  const issuedAt = new Date().toISOString();
+  const snapshotRecord = (snapshot: unknown) => record({
+    stateId: 'cms_snapshot00000', sequence: 2, previousStateId: 'cms_genesis000000',
+    action: 'snapshot', members: [owner], issuedAt, snapshot: snapshot as never,
+  });
+
+  it('accepts a snapshot only when it equals the one computed from the history', () => {
+    const expected = computeCircleMembershipSnapshot([ownerGenesis], issuedAt);
+    expect(validateCircleMembershipStateTransition({
+      record: snapshotRecord(expected), previous: ownerGenesis.claim, history: [ownerGenesis],
+    })).toEqual({ ok: true });
+    expect(validateCircleMembershipStateTransition({
+      record: snapshotRecord({ ...expected, formerIdentityIds: ['SOMEONE'] }), previous: ownerGenesis.claim, history: [ownerGenesis],
+    })).toEqual({ ok: false, message: 'Invalid Circle membership snapshot' });
+    expect(validateCircleMembershipStateTransition({
+      record: snapshotRecord(undefined), previous: ownerGenesis.claim, history: [ownerGenesis],
+    })).toEqual({ ok: false, message: 'Invalid Circle membership snapshot' });
+  });
+});
+
+describe('membership states from a snapshot', () => {
+  const chain = [
+    { action: 'genesis', sequence: 1 }, { action: 'add', sequence: 2 }, { action: 'snapshot', sequence: 3 },
+    { action: 'add', sequence: 4 }, { action: 'snapshot', sequence: 5 }, { action: 'remove', sequence: 6 },
+  ].map(({ action, sequence }) => ({
+    claim: { payload: { sequence, action, stateId: `cms_${sequence}` } },
+    admission: null,
+  })) as unknown as CircleMembershipStateRecord[];
+  const sequences = (states: CircleMembershipStateRecord[]) => states.map((state) => state.claim.payload.sequence);
+
+  it('starts at the latest snapshot the client checkpoint anchors', () => {
+    expect(sequences(membershipStatesAfter(chain, undefined, 6).states)).toEqual([5, 6]);
+    expect(sequences(membershipStatesAfter(chain, undefined, 4).states)).toEqual([3, 4, 5, 6]);
+    expect(membershipStatesAfter(chain, undefined, 4).statesFromSnapshotSequence).toBe(3);
+    expect(membershipStatesAfter(chain, undefined, 2).states).toBe(chain);
+    expect(membershipStatesAfter(chain, undefined, undefined).states).toBe(chain);
+  });
+
+  it('prefers a matching stored head over the snapshot cut', () => {
+    const result = membershipStatesAfter(chain, { sequence: 4, stateId: 'cms_4' }, 4);
+    expect(sequences(result.states)).toEqual([5, 6]);
+    expect(result.statesAfterSequence).toBe(4);
+    expect(result.statesFromSnapshotSequence).toBeNull();
   });
 });

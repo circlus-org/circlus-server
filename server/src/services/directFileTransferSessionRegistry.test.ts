@@ -61,6 +61,47 @@ describe('DirectFileTransferSessionRegistry', () => {
     expect(expired).toEqual(['session']);
   });
 
+  it('gives an accepted transfer its own deadline and keeps pending requests scoped to the target', () => {
+    const routes = registry();
+    const receiver = socket('receiver');
+    routes.register(session({ sessionId: 'first', expiresAt: 1_500, targetDeviceId: 'device-one' }));
+    routes.register(session({ sessionId: 'second', expiresAt: 2_000, targetDeviceId: 'device-two' }));
+    expect(routes.pendingForTarget('family', 'receiver', 'device-one').map((item) => item.incomingData.sessionId))
+      .toEqual(['first']);
+    routes.bindTarget('first', receiver);
+    routes.extend('first', 5_000);
+    now = 1_501;
+    expect(routes.get('first')?.expiresAt).toBe(5_000);
+    expect(routes.pendingForTarget('family', 'receiver', 'device-one')).toEqual([]);
+    expect(routes.pendingForTarget('other-family', 'receiver', 'device-two')).toEqual([]);
+    now = 5_001;
+    expect(routes.get('first')).toBeUndefined();
+  });
+
+  it('re-arms the expiry callback when an accepted transfer gets a new deadline', () => {
+    const callbacks: Array<() => void> = [];
+    const expired: string[] = [];
+    const routes = new DirectFileTransferSessionRegistry({
+      now: () => now,
+      setTimer: (callback) => {
+        callbacks.push(callback);
+        return ({ unref() {} }) as unknown as NodeJS.Timeout;
+      },
+      clearTimer: () => {},
+      onExpire: (entry) => expired.push(entry.incomingData.sessionId)
+    });
+    routes.register(session({ expiresAt: 1_500 }));
+    routes.bindTarget('session', socket('receiver'));
+    routes.extend('session', 3_000);
+    now = 1_500;
+    callbacks[0]();
+    expect(routes.get('session')).toBeDefined();
+    now = 3_000;
+    callbacks[1]();
+    expect(routes.get('session')).toBeUndefined();
+    expect(expired).toEqual(['session']);
+  });
+
   it('bounds and drains initiator ICE candidates', () => {
     const routes = registry();
     routes.register(session());

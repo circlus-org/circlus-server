@@ -166,6 +166,21 @@ export async function recordCallHandlingEventForActor(
   if (callLog.initiator_identity_id === actor.identityId) return null;
 
   const callSession = await callSessionRepository.findByCallSessionId(actor.familyId, callSessionId);
+  // The phone can regain network access after the caller has already cancelled.
+  // Correct a missed/no-answer history only when the authenticated callee's
+  // decline happened during that ringing interval. An answered call stays final.
+  if (deliveryStatus.status === 'declined' && callSession?.state === 'ended' &&
+      callLog.target_identity_id === actor.identityId &&
+      callLog.final_status === 'missed' && callLog.final_reason === 'no_answer' &&
+      callLog.connected_at === null && callLog.ended_at !== null &&
+      report.occurredAt >= callLog.created_at && report.occurredAt <= callLog.ended_at) {
+    await callHistoryRepository.markRejectedAfterLateDecline({
+      familyId: actor.familyId,
+      callSessionId,
+      declinedAt: report.occurredAt
+    });
+    return null;
+  }
   // A late Android handling report must not mark an answered call as declined.
   if (
     deliveryStatus.status === 'declined' &&

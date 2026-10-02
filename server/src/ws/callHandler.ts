@@ -785,6 +785,7 @@ const wsMessageHandlers = {
     ws,
     data as WSDirectFileTransferCompletedData
   ),
+  'file-transfer:sync-pending': (ws) => directFileTransferSignaling.handleSyncPending(ws),
   'file-transfer:bootstrap': (ws, data) => directFileTransferSignaling.handleBootstrap(
     ws,
     data as WSDirectFileTransferBootstrapData

@@ -3,6 +3,7 @@ jest.mock('../db/repositories', () => ({
     recordMediaConnection: jest.fn(),
     findByCallSessionId: jest.fn(),
     markRejected: jest.fn(),
+    markRejectedAfterLateDecline: jest.fn().mockResolvedValue(true),
     markConnected: jest.fn(),
     markHeartbeat: jest.fn(),
     markFinalized: jest.fn()
@@ -65,6 +66,38 @@ describe('callLifecycleService', () => {
     });
     await expect(recordCallHandlingEventForActor(actor, report)).resolves.toBeNull();
     expect(callHandlingEventRepository.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('corrects a missed call when the callee declined before the caller cancelled', async () => {
+    (callHistoryRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      initiator_identity_id: 'bob', target_identity_id: 'alice',
+      final_status: 'missed', final_reason: 'no_answer',
+      created_at: 100, ended_at: 400, connected_at: null
+    });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['alice', 'bob'], state: 'ended'
+    });
+    await expect(recordCallHandlingEventForActor(actor, {
+      callSessionId: 'call-1', eventType: 'declined', occurredAt: 200
+    })).resolves.toBeNull();
+    expect(callHistoryRepository.markRejectedAfterLateDecline).toHaveBeenCalledWith({
+      familyId: 'family-1', callSessionId: 'call-1', declinedAt: 200
+    });
+  });
+
+  it('does not correct a missed call for a decline after the call ended', async () => {
+    (callHistoryRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      initiator_identity_id: 'bob', target_identity_id: 'alice',
+      final_status: 'missed', final_reason: 'no_answer',
+      created_at: 100, ended_at: 400, connected_at: null
+    });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['alice', 'bob'], state: 'ended'
+    });
+    await expect(recordCallHandlingEventForActor(actor, {
+      callSessionId: 'call-1', eventType: 'declined', occurredAt: 500
+    })).resolves.toBeNull();
+    expect(callHistoryRepository.markRejectedAfterLateDecline).not.toHaveBeenCalled();
   });
 
   it('keeps the blocking call ID separate from the busy reason', async () => {

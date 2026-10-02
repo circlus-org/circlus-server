@@ -1,0 +1,17 @@
+# Use with: docker compose -f compose.yaml -f compose.prebuilt.yaml ...
+# Keep the same Compose project name, volumes, secrets, and service configuration.
+services:
+  migrate:
+    build: !reset null
+    image: ${CIRCLUS_SERVER_IMAGE:-ghcr.io/circlus-org/circlus-server}:${CIRCLUS_IMAGE_TAG:?Set CIRCLUS_IMAGE_TAG to a published release tag}
+    pull_policy: missing
+
+  server:
+    build: !reset null
+    image: ${CIRCLUS_SERVER_IMAGE:-ghcr.io/circlus-org/circlus-server}:${CIRCLUS_IMAGE_TAG:?Set CIRCLUS_IMAGE_TAG to a published release tag}
+    pull_policy: missing
+
+  ice-config-service:
+    build: !reset null
+    image: ${CIRCLUS_ICE_IMAGE:-ghcr.io/circlus-org/circlus-server-ice-config-service}:${CIRCLUS_IMAGE_TAG:?Set CIRCLUS_IMAGE_TAG to a published release tag}
+    pull_policy: missing

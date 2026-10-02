@@ -78,10 +78,13 @@ services:
       ICE_SUBJECT_ID_SECRET_FILE: /run/secrets/ice_subject_id
       MANAGED_PUSH_CONFIG_ENCRYPTION_KEY: ""
       MANAGED_PUSH_CONFIG_ENCRYPTION_KEY_FILE: /run/secrets/push_config_encryption
+      CIRCLE_MIGRATION_SECRET_KEY_BASE64: ""
+      CIRCLE_MIGRATION_SECRET_KEY_BASE64_FILE: /run/secrets/circle_migration
     secrets:
       - ice_s2s
       - ice_subject_id
       - push_config_encryption
+      - circle_migration
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
@@ -140,6 +143,8 @@ secrets:
     file: ${TURN_LOCAL_SECRET_FILE:-./deploy/secrets/turn-local.secret}
   push_config_encryption:
     file: ${PUSH_CONFIG_ENCRYPTION_SECRET_FILE:-./deploy/secrets/push-config-encryption.secret}
+  circle_migration:
+    file: ${CIRCLE_MIGRATION_SECRET_FILE:-./deploy/secrets/circle-migration.secret}
 
 volumes:
   postgres_data:

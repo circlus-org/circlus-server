@@ -148,10 +148,8 @@ export function httpUrlSetting(
   return value;
 }
 
-export function optionalBase64Secret(
-  environment: NodeJS.ProcessEnv,
-  key: string
-): string | null {
+/** A secret given inline as `KEY` or as a file path in `KEY_FILE`. */
+function optionalSecretValue(environment: NodeJS.ProcessEnv, key: string): string | null {
   const inlineValue = optionalString(environment, key);
   const filePath = optionalString(environment, `${key}_FILE`);
   if (inlineValue && filePath) {
@@ -170,7 +168,14 @@ export function optionalBase64Secret(
       throw new ServerConfigurationError(`${key}_FILE`, 'must reference a non-empty regular file');
     }
   }
-  const value = inlineValue || fileValue;
+  return inlineValue || fileValue;
+}
+
+export function optionalBase64Secret(
+  environment: NodeJS.ProcessEnv,
+  key: string
+): string | null {
+  const value = optionalSecretValue(environment, key);
   if (!value) return null;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
     throw new ServerConfigurationError(key, 'must be valid base64');
@@ -187,7 +192,7 @@ export function optionalFixedBase64Secret(
   key: string,
   bytes: number
 ): string | null {
-  const value = optionalString(environment, key);
+  const value = optionalSecretValue(environment, key);
   if (!value) return null;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
     throw new ServerConfigurationError(key, 'must be valid base64');

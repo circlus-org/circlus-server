@@ -11,6 +11,9 @@ describe('provider-neutral mobile delivery metadata', () => {
   test('routes only an incoming call through the call delivery class', () => {
     expect(mobileDeliveryClassForPayload({ type: 'incoming_call' })).toBe('call');
     expect(mobileDeliveryClassForPayload({ type: 'call_status' })).toBe('background');
+    expect(mobileDeliveryClassForPayload({ type: 'call_status', callStatus: 'ended' })).toBe('background');
+    expect(mobileDeliveryClassForPayload({ type: 'call_status', callStatus: 'answered_elsewhere' })).toBe('background');
+    expect(mobileDeliveryClassForPayload({ type: 'call_status', callStatus: 'missed' })).toBe('notification');
     expect(mobileDeliveryClassForPayload({ type: 'incoming_message' })).toBe('notification');
     expect(mobileDeliveryClassForPayload({ type: 'direct_file_transfer' })).toBe('notification');
     expect(mobileDeliveryClassForPayload({ type: 'messages_read' })).toBe('background');

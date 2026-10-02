@@ -22,7 +22,10 @@ jest.mock('../services/attachmentStorageService', () => ({ attachmentStorageServ
 jest.mock('../services/publicSiteAssetStorageService', () => ({ publicSiteAssetStorageService: {} }));
 jest.mock('../services/identityDeletionService', () => ({ deleteIdentityDataFromCircle: jest.fn(), IdentityDeletionServiceError: class extends Error {} }));
 jest.mock('../services/circleMembershipProofService', () => ({ listCircleIdentityAdmissionProofs: jest.fn() }));
-jest.mock('../services/circleMembershipStateService', () => ({ listCircleMembershipStates: jest.fn() }));
+jest.mock('../services/circleMembershipStateService', () => ({
+  listCircleMembershipStates: jest.fn(),
+  membershipStatesAfter: jest.requireActual('../services/circleMembershipStateService').membershipStatesAfter,
+}));
 jest.mock('../services/circleInvitePermissionService', () => ({ setCircleInvitePermission: jest.fn() }));
 jest.mock('../services/circleMembershipAdminService', () => ({ setCircleMemberStatus: jest.fn() }));
 jest.mock('../services/circleDirectoryNotificationService', () => ({ notifyCircleDirectoryChanged: jest.fn() }));
@@ -91,6 +94,21 @@ describe('Circle owner guest tree API', () => {
     expect(res.json.mock.calls[0][0].result.users).toEqual([
       expect.objectContaining({ identityId: 'owner-1', activeGuestCount: 2 }),
     ]);
+  });
+
+  it('returns only the membership states after the head the client stored', async () => {
+    repositories.identityRepository.findAll.mockResolvedValue([]);
+    require('../services/circleMembershipProofService').listCircleIdentityAdmissionProofs.mockResolvedValue([]);
+    const state = (sequence: number) => ({ claim: { payload: { sequence, stateId: `cms_${sequence}`, action: 'add' } }, admission: null });
+    require('../services/circleMembershipStateService').listCircleMembershipStates.mockResolvedValue([state(1), state(2), state(3)]);
+    (require('../db').query as jest.Mock).mockResolvedValue({ rows: [] });
+    const res = response();
+
+    await handler('/users')({ familyId: 'family-1', signedRequest: { payload: { since: { sequence: 2, stateId: 'cms_2' } } } }, res);
+
+    const result = res.json.mock.calls[0][0].result;
+    expect(result.membershipStates.map((entry: any) => entry.claim.payload.sequence)).toEqual([3]);
+    expect(result.statesAfterSequence).toBe(2);
   });
 
   it('returns one host-scoped page with counts and no names or device labels', async () => {

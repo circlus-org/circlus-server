@@ -172,7 +172,8 @@ describe('server runtime config', () => {
         exportDir: path.resolve(process.cwd(), 'server-data', 'circle-migrations'),
         importDir: path.resolve(process.cwd(), 'server-data', 'circle-migration-imports'),
         httpTimeoutMs: 10_000,
-        freezeDrainTimeoutMs: 60_000
+        freezeDrainTimeoutMs: 60_000,
+        testPrivateEndpointHosts: []
       },
       rateLimits: {
         communicationIdentity: { windowMs: 60_000, readMax: 600, writeMax: 240 },
@@ -443,11 +444,37 @@ describe('server runtime config', () => {
       exportDir: path.resolve(process.cwd(), 'exports'),
       importDir: path.resolve(process.cwd(), 'imports'),
       httpTimeoutMs: 15_000,
-      freezeDrainTimeoutMs: 60_000
+      freezeDrainTimeoutMs: 60_000,
+      testPrivateEndpointHosts: []
     });
     expect(() => loadCircleMigrationRuntimeConfig(environment({
       CIRCLE_MIGRATION_SECRET_KEY_BASE64: Buffer.alloc(33).toString('base64')
     }))).toThrow('CIRCLE_MIGRATION_SECRET_KEY_BASE64 must encode exactly 32 random bytes');
+  });
+
+  it('loads the Circle migration key from a Docker-style secret file', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'circlus-migration-secret-'));
+    const secretPath = path.join(directory, 'circle-migration.secret');
+    const secret = Buffer.alloc(32, 7).toString('base64');
+    fs.writeFileSync(secretPath, `${secret}\n`, 'utf8');
+    expect(loadCircleMigrationRuntimeConfig(environment({
+      CIRCLE_MIGRATION_SECRET_KEY_BASE64_FILE: secretPath
+    })).secretKeyBase64).toBe(secret);
+    expect(() => loadCircleMigrationRuntimeConfig(environment({
+      CIRCLE_MIGRATION_SECRET_KEY_BASE64: secret,
+      CIRCLE_MIGRATION_SECRET_KEY_BASE64_FILE: secretPath
+    }))).toThrow('cannot both be configured');
+  });
+
+  it('accepts only plain hostnames as test private migration endpoints', () => {
+    expect(loadCircleMigrationRuntimeConfig(environment({
+      CIRCLE_MIGRATION_TEST_PRIVATE_ENDPOINT_HOSTS: ' Circle-B.test , '
+    })).testPrivateEndpointHosts).toEqual(['circle-b.test']);
+    for (const invalid of ['10.0.0.5', 'https://circle-b.test', 'circle-b.test:8443', 'localhost', '*.test']) {
+      expect(() => loadCircleMigrationRuntimeConfig(environment({
+        CIRCLE_MIGRATION_TEST_PRIVATE_ENDPOINT_HOSTS: invalid
+      }))).toThrow('CIRCLE_MIGRATION_TEST_PRIVATE_ENDPOINT_HOSTS');
+    }
   });
 
   it('loads and bounds route rate limits in one typed section', () => {
