@@ -67,10 +67,6 @@ export type WsRegistrationHandlerDependencies = {
     info: LocalConnectionInfo,
     peerIdentityId: string
   ) => Promise<boolean>;
-  resolvePublishedIdentityName: (
-    familyId: string,
-    identity: any | null
-  ) => Promise<string | undefined>;
   replayStoredIceCandidates: (params: {
     ws: WebSocket;
     callSessionId: CallSessionId;
@@ -723,9 +719,6 @@ export class WsRegistrationHandlers {
               value: fromIdentity.public_key_value
             }
           : externalMeta?.publicKey;
-        const fromIdentityName = fromIdentity
-          ? await this.dependencies.resolvePublishedIdentityName(info.familyId, fromIdentity)
-          : (externalMeta?.displayName || undefined);
 
         if (row.state === 'new') {
           await callSessionRepository.updateState(info.familyId, row.call_session_id, 'ringing');
@@ -736,7 +729,9 @@ export class WsRegistrationHandlers {
             callSessionId: row.call_session_id,
             fromIdentityId: row.initiator,
             fromIdentityPublicKey,
-            fromIdentityName,
+            ...(!fromIdentity && externalMeta?.displayName
+              ? { fromIdentityName: externalMeta.displayName }
+              : {}),
             isTemporaryLinkCall: externalMeta?.admissionKind === 'call_link',
             capabilityGrant: externalMeta?.capabilityGrant,
             offer

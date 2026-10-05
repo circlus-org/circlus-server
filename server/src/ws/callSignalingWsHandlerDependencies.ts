@@ -44,10 +44,6 @@ export type CallSignalingWsHandlerDependencies = {
     info: LocalConnectionInfo,
     peerIdentityId: string
   ) => Promise<boolean>;
-  resolvePublishedIdentityName: (
-    familyId: string,
-    identity: any | null
-  ) => Promise<string | undefined>;
   replayStoredIceCandidates: (params: {
     ws: WebSocket;
     callSessionId: CallSessionId;

@@ -81,12 +81,6 @@ function assertDirectEpoch(epoch: number | null | undefined): asserts epoch is n
   }
 }
 
-async function resolvePublishedIdentityName(familyId: string, identity: any | null): Promise<string | undefined> {
-  void familyId;
-  void identity;
-  return undefined;
-}
-
 function buildSenderPublicKey(identity: any | null): PublicKey | undefined {
   if (!identity) return undefined;
   return {
@@ -244,7 +238,6 @@ export async function sendDirectMessage(params: {
     activityAt: params.authorClaim?.payload?.foregroundActivityAt
   });
   const senderIdentityPublicKey = buildSenderPublicKey(senderIdentity);
-  const senderIdentityName = await resolvePublishedIdentityName(params.familyId, senderIdentity);
   const senderIdentityRole = senderIdentity?.role === 'owner' || senderIdentity?.role === 'member' || senderIdentity?.role === 'guest'
     ? senderIdentity.role
     : undefined;
@@ -301,7 +294,6 @@ export async function sendDirectMessage(params: {
     recipientIdentityId,
     senderDeviceId: params.senderDeviceId,
     senderIdentityPublicKey,
-    senderIdentityName,
     senderIdentityRole,
     ciphertext,
     senderCiphertext: params.senderCiphertext ?? undefined,
@@ -329,7 +321,7 @@ export async function sendDirectMessage(params: {
     recipientIdentityId,
     serverMessageId,
     params.senderIdentityId,
-    senderIdentityName,
+    undefined,
     {
       peerIdentityId: params.senderIdentityId,
       dialogId: params.senderIdentityId,
@@ -523,7 +515,6 @@ export async function editDirectMessage(params: {
       message.sender_device_id
     ),
     senderIdentityPublicKey: buildSenderPublicKey(senderIdentity),
-    senderIdentityName: await resolvePublishedIdentityName(params.familyId, senderIdentity),
     ciphertext,
     senderCiphertext: params.senderCiphertext ?? undefined,
     senderSignature: params.senderSignature,
@@ -599,7 +590,6 @@ export async function deleteDirectMessage(params: {
       message.sender_device_id
     ),
     senderIdentityPublicKey: buildSenderPublicKey(senderIdentity),
-    senderIdentityName: await resolvePublishedIdentityName(params.familyId, senderIdentity),
     ciphertext: '',
     senderCiphertext: undefined,
     senderSignature: '',

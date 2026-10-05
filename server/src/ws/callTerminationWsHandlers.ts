@@ -2,8 +2,7 @@ import type { WebSocket } from 'ws';
 import type { CallSessionId, IdentityId, WebSocketMessage } from '@shared/types';
 import {
   callHistoryRepository,
-  callSessionRepository,
-  identityRepository
+  callSessionRepository
 } from '../db/repositories';
 import type { CallRingingService } from '../services/callRingingService';
 import type { CallSessionRoutingRegistry, CallSessionRoute } from '../services/callSessionRoutingRegistry';
@@ -46,10 +45,6 @@ export type CallTerminationWsHandlerDependencies = {
     message: WebSocketMessage
   ) => void;
   sendError: (ws: WebSocket, code: string, message: string) => void;
-  resolvePublishedIdentityName: (
-    familyId: string,
-    identity: any | null
-  ) => Promise<string | undefined>;
   callRingingService: Pick<CallRingingService, 'stop'>;
   callSessionRouting: Pick<CallSessionRoutingRegistry, 'get' | 'remove'>;
   describeSocket: (ws: WebSocket) => Record<string, string | undefined>;
@@ -502,20 +497,11 @@ export class CallTerminationWsHandlers {
     callLinkPresentation: CallLinkPresentation
   ): Promise<void> {
     try {
-      const fromIdentity = await identityRepository.findByIdentityId(
-        params.familyId,
-        params.targetIdentityId
-      );
-      const fromIdentityName = await this.dependencies.resolvePublishedIdentityName(
-        params.familyId,
-        fromIdentity
-      );
       await sendCallStatusPush(params.familyId, otherParticipant, {
         callSessionId: params.callSessionId,
         callStatus: 'ended',
         callEndReason: 'declined',
         fromIdentityId: params.targetIdentityId,
-        fromIdentityName: callLinkPresentation.isTemporaryLinkCall ? undefined : fromIdentityName,
         ...callLinkPresentation
       });
     } catch (error) {
@@ -538,19 +524,11 @@ export class CallTerminationWsHandlers {
     callLinkPresentation: CallLinkPresentation
   ): Promise<void> {
     try {
-      const callerIdentity = otherParticipant
-        ? await identityRepository.findByIdentityId(params.familyId, otherParticipant)
-        : null;
-      const callerIdentityName = await this.dependencies.resolvePublishedIdentityName(
-        params.familyId,
-        callerIdentity
-      );
       await sendCallStatusPush(params.familyId, params.targetIdentityId, {
         callSessionId: params.callSessionId,
         callStatus: 'ended',
         callEndReason: 'normal',
         fromIdentityId: otherParticipant,
-        fromIdentityName: callLinkPresentation.isTemporaryLinkCall ? undefined : callerIdentityName,
         ...callLinkPresentation
       });
     } catch (error) {
@@ -707,18 +685,6 @@ export class CallTerminationWsHandlers {
       }
     );
     try {
-      const fromIdentity = params.info.actorType === 'local'
-        ? await identityRepository.findByIdentityId(
-            params.info.familyId,
-            params.info.identityId
-          )
-        : null;
-      const fromIdentityName = params.info.actorType === 'external'
-        ? params.info.externalDisplayName
-        : await this.dependencies.resolvePublishedIdentityName(
-            params.info.familyId,
-            fromIdentity
-          );
       const externalCallLinkTitle = params.info.actorType === 'external'
         && params.info.callGrant?.kind === 'call_link'
         ? params.info.callGrant.callLinkTitle || undefined
@@ -734,7 +700,9 @@ export class CallTerminationWsHandlers {
         callStatus: params.peerPushStatus,
         callEndReason: params.peerPushEndReason,
         fromIdentityId: params.info.identityId,
-        fromIdentityName: isTemporaryLinkCall ? undefined : fromIdentityName,
+        ...(params.info.actorType === 'external' && !isTemporaryLinkCall
+          ? { fromIdentityName: params.info.externalDisplayName }
+          : {}),
         isTemporaryLinkCall,
         callLinkTitle
       });

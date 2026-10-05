@@ -67,7 +67,6 @@ function harness(overrides: Partial<CallTerminationWsHandlerDependencies> = {}) 
     sendMessage: jest.fn(),
     sendToConnectionSet: jest.fn(),
     sendError: jest.fn(),
-    resolvePublishedIdentityName: jest.fn(async () => 'Caller'),
     callRingingService: callRingingService as any,
     callSessionRouting: callSessionRouting as any,
     describeSocket: jest.fn(() => ({ actorType: 'local' })),

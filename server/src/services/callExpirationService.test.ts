@@ -42,7 +42,6 @@ function harness(overrides: Partial<CallExpirationDependencies> = {}) {
     getTargetSockets: jest.fn(() => new Set([targetWs])),
     sendMessage: jest.fn(),
     sendToConnectionSet: jest.fn(),
-    resolvePublishedIdentityName: jest.fn(async () => 'Caller'),
     removeRoute: jest.fn(),
     logger: logger as any,
     now: () => 2_000,

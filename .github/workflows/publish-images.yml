@@ -1,5 +1,6 @@
 # Exported to .github/workflows/publish-images.yml in the server repository.
-# Tags are published only from a public repository after the private rehearsal.
+# Each repository publishes tagged images to its own GHCR package.
+# Private packages support the rehearsal; public packages support releases.
 name: Publish server images
 
 on:
@@ -11,11 +12,9 @@ permissions:
 
 jobs:
   verify:
-    if: github.event.repository.private == false
     uses: ./.github/workflows/ci.yml
 
   publish:
-    if: github.event.repository.private == false
     needs: verify
     runs-on: ubuntu-24.04
     permissions:

@@ -29,12 +29,6 @@ import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 
 const router = express.Router();
 
-async function resolvePublishedIdentityName(familyId: string, identity: any | null): Promise<string | undefined> {
-  void familyId;
-  void identity;
-  return undefined;
-}
-
 function normalizeOrigin(value: string | null | undefined): string | null {
   const s = (value || '').trim();
   if (!s) return null;
@@ -268,9 +262,7 @@ router.post('/calls/bootstrap', async (req, res) => {
             value: remoteIdentity.public_key_value
           }
         : externalMeta?.publicKey;
-      remoteIdentityName = remoteIdentity
-        ? await resolvePublishedIdentityName(familyId, remoteIdentity)
-        : (externalMeta?.displayName || undefined);
+      if (!remoteIdentity) remoteIdentityName = externalMeta?.displayName || undefined;
     } catch {
       // best-effort — client falls back to WS call:incoming if offer is absent
     }

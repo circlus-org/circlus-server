@@ -217,7 +217,6 @@ const callExpirationService = new CallExpirationService({
   ),
   sendMessage: (ws, message) => sendMessage(ws, message),
   sendToConnectionSet: (sockets, message) => sendToConnectionSet(sockets, message),
-  resolvePublishedIdentityName,
   removeRoute: (callSessionId) => {
     callSessionRouting.remove(callSessionId);
   }
@@ -322,12 +321,6 @@ function replayStoredIceCandidates(params: {
   }
 }
 
-async function resolvePublishedIdentityName(familyId: string, identity: any | null): Promise<string | undefined> {
-  void familyId;
-  void identity;
-  return undefined;
-}
-
 let httpCallRuntimeSessionManager: HttpCallRuntimeSessionManager;
 const wsTransport = createWsTransport({
   findHttpRuntimeQueue: (ws) => httpCallRuntimeSessionManager?.findQueueBySocket(ws) || null,
@@ -426,8 +419,7 @@ const directFileTransferSignaling = new DirectFileTransferSignalingService({
   ),
   getDeviceSockets: (deviceId) => connectionRegistry.getDeviceSockets(deviceId),
   sendMessage,
-  sendError,
-  resolvePublishedIdentityName
+  sendError
 });
 
 function requireWsActor(ws: WebSocket, dataDeviceId?: DeviceId | string) {
@@ -622,7 +614,6 @@ const wsRegistrationHandlers = new WsRegistrationHandlers({
   sendError,
   touchConnectionLastSeen,
   isTemporaryCallTargetAllowed,
-  resolvePublishedIdentityName,
   replayStoredIceCandidates,
   callSessionRouting,
   describeSocket,
@@ -646,7 +637,6 @@ const callSignalingWsHandlers = new CallSignalingWsHandlers({
   validateTemporaryCallDelegation,
   consumeEarlyEndedCallSession: (params) => earlyEndedCallSessionRegistry.consume(params),
   isTemporaryCallTargetAllowed,
-  resolvePublishedIdentityName,
   replayStoredIceCandidates,
   sendCallDeliveryStatus: (params) => wsEventPublisher.sendCallDeliveryStatus(params),
   supersedeDisconnectedCall: (params) => (
@@ -670,7 +660,6 @@ const callTerminationWsHandlers = new CallTerminationWsHandlers({
   sendMessage,
   sendToConnectionSet,
   sendError,
-  resolvePublishedIdentityName,
   callRingingService,
   callSessionRouting,
   describeSocket,

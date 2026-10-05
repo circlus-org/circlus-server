@@ -49,6 +49,24 @@ describe('provider-neutral mobile delivery metadata', () => {
   });
 });
 
+describe('incoming call decline routing', () => {
+  test('includes the Circle ID in the decline URL for shared server origins', () => {
+    const payload = enrichMobilePayloadForBinding(
+      { type: 'incoming_call', callSessionId: 'call-1' },
+      { bound_web_origin: 'https://app.circlus.example', native_message_preview_mode: 'off' },
+      {
+        familyId: 'family-1',
+        publicBaseUrl: 'https://shared.example',
+        serverOrigin: 'https://shared.example',
+        circleId: 'circle-1',
+        serverDisplayHint: 'Family',
+        vpsId: 'vps-1'
+      }
+    );
+    expect(new URL(payload.declineUrl!).searchParams.get('circleId')).toBe('circle-1');
+  });
+});
+
 describe('channel publication push navigation', () => {
   test('opens the owner Circle directly on the Channels section', () => {
     const url = buildWebOpenUrl({

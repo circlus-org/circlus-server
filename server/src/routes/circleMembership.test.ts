@@ -242,6 +242,7 @@ describe('Circle membership route behavior', () => {
 
   it('publishes an own profile only against the locked current epoch', async () => {
     clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM identities')) return { rows: [{ status: 'active' }] };
       if (sql.includes('SELECT epoch FROM circle_profile_epochs')) return { rows: [{ epoch: 1 }] };
       if (sql.includes('SELECT owner_identity_id')) return { rows: [] };
       if (sql.includes('INSERT INTO circle_encrypted_identity_profiles')) return { rows: [profileRow] };
@@ -252,6 +253,7 @@ describe('Circle membership route behavior', () => {
     expect(res.json.mock.calls[0][0].result).toMatchObject({ applied: true, profile: { ownerIdentityId: 'alice' } });
     expect(clientQuery.mock.calls.map(([sql]) => String(sql))).toEqual([
       expect.stringContaining('FOR UPDATE'),
+      expect.stringContaining('SELECT status FROM identities'),
       expect.stringContaining('SELECT epoch FROM circle_profile_epochs'),
       expect.stringContaining('FROM circle_encrypted_identity_profiles'),
       expect.stringContaining('INSERT INTO circle_encrypted_identity_profiles')
@@ -264,12 +266,28 @@ describe('Circle membership route behavior', () => {
     expect(inTransaction).toHaveBeenCalledTimes(1);
 
     clientQuery.mockClear();
-    clientQuery.mockImplementation(async (sql: string) => sql.includes('SELECT epoch FROM circle_profile_epochs')
-      ? { rows: [{ epoch: 2 }] } : { rows: [] });
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM identities')) return { rows: [{ status: 'active' }] };
+      if (sql.includes('SELECT epoch FROM circle_profile_epochs')) return { rows: [{ epoch: 2 }] };
+      return { rows: [] };
+    });
     const stale = response();
     await handler('/profiles/publish')(request({ profile }), stale);
     expect(stale.status).toHaveBeenCalledWith(409);
     expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO circle_encrypted_identity_profiles'))).toBe(false);
+  });
+
+  it('rejects an in-flight profile publication after the identity is disabled', async () => {
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM identities')) return { rows: [{ status: 'disabled' }] };
+      return { rows: [] };
+    });
+    const res = response();
+    await handler('/profiles/publish')(request({ profile }), res);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json.mock.calls[0][0].error.code).toBe('IDENTITY_DISABLED');
+    expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO circle_encrypted_identity_profiles'))).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('allows self-removal through the transaction client but rejects administrative adds', async () => {

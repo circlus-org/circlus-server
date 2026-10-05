@@ -390,9 +390,6 @@ export class CallOfferWsHandler {
               value: fromIdentity.public_key_value
             }
           : undefined);
-    const fromIdentityName = info.actorType === 'external'
-      ? info.externalDisplayName
-      : await this.dependencies.resolvePublishedIdentityName(info.familyId, fromIdentity);
     const callLinkTitle = info.actorType === 'external' && info.callGrant?.kind === 'call_link'
       ? info.callGrant.callLinkTitle || undefined
       : undefined;
@@ -403,7 +400,7 @@ export class CallOfferWsHandler {
         callSessionId: params.callSessionId,
         fromIdentityId: info.identityId,
         fromIdentityPublicKey,
-        fromIdentityName,
+        ...(info.actorType === 'external' ? { fromIdentityName: info.externalDisplayName } : {}),
         isTemporaryLinkCall: params.isTemporaryLinkCall,
         callLinkTitle,
         capabilityGrant: info.actorType === 'external' && info.callGrant?.kind === 'call_link'
@@ -453,14 +450,7 @@ export class CallOfferWsHandler {
           ? info.callGrant.callLinkTitle || undefined
           : undefined,
         targetHasActiveSockets: !!targetSockets && targetSockets.size > 0,
-        resolveFromIdentityName: async () => {
-          if (info.actorType === 'external') return info.externalDisplayName;
-          const fromIdentity = await identityRepository.findByIdentityId(
-            info.familyId,
-            info.identityId
-          );
-          return this.dependencies.resolvePublishedIdentityName(info.familyId, fromIdentity);
-        }
+        ...(info.actorType === 'external' ? { fromIdentityName: info.externalDisplayName } : {})
       });
       if (pushResult.status === 'stale') {
         this.logger.info('call_incoming_push_stale', {

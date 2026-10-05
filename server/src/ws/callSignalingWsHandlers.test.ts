@@ -121,7 +121,6 @@ function harness(overrides: Partial<CallSignalingWsHandlerDependencies> = {}) {
     validateTemporaryCallDelegation: jest.fn(async () => true),
     consumeEarlyEndedCallSession: jest.fn(() => false),
     isTemporaryCallTargetAllowed: jest.fn(async () => true),
-    resolvePublishedIdentityName: jest.fn(async () => 'Published name'),
     replayStoredIceCandidates: jest.fn(),
     sendCallDeliveryStatus: jest.fn(),
     supersedeDisconnectedCall: jest.fn(async () => false),

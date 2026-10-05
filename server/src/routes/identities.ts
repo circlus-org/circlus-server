@@ -10,14 +10,17 @@ import {
 import { attachmentStorageService } from '../services/attachmentStorageService';
 import { publicSiteAssetStorageService } from '../services/publicSiteAssetStorageService';
 import { deleteIdentityDataFromCircle, IdentityDeletionServiceError } from '../services/identityDeletionService';
-import { notifyCircleServerDataDeleted, notifyIdentityServerDataDeleted } from '../ws/wsGateway';
+import { notifyCircleServerDataDeleted, notifyIdentityServerDataDeleted, suspendIdentityWsAccess } from '../ws/wsGateway';
 import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import type { TenancyRequest } from '../middleware/tenancy';
-import type { ApiResponse } from '../../../shared/types';
+import type { ApiResponse, CircleMembershipStateRecord } from '../../../shared/types';
 import { createRateLimiter, ipFamilyKey } from '../middleware/rateLimit';
 import { getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
 import { circleProfileAvatarBlobId } from '../services/circleProfileAvatarPublication';
+import { disableOwnCircleIdentity } from '../services/identitySelfDisableService';
+import { notifyCircleDirectoryChanged } from '../services/circleDirectoryNotificationService';
+import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 
 const router = Router();
 
@@ -32,6 +35,51 @@ const rlAvatar = createRateLimiter({
   max: identityRateLimits.avatarUploadMax,
   keyFn: ipFamilyKey
 });
+
+// ---------------------------------------------------------------------------
+// POST /identities/disable-self - stop access and retire live capabilities
+// ---------------------------------------------------------------------------
+router.post(
+  '/disable-self',
+  verifySignature,
+  requireActiveIdentity,
+  requireFullCircleIdentity,
+  async (req: AuthRequest & TenancyRequest, res) => {
+    try {
+      const familyId = req.familyId;
+      const identityId = req.device?.identityId;
+      if (!familyId || !identityId) {
+        return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Circle identity is required' } } as ApiResponse);
+      }
+      const membershipState = getSignedPayload<{ membershipState?: CircleMembershipStateRecord }>(req).membershipState;
+      if (
+        req.signedRequest?.type !== 'identity:disable-self'
+        || !membershipState
+        || membershipState.claim?.signerId !== identityId
+        || membershipState.claim.payload?.action !== 'remove'
+        || membershipState.claim.payload.subjectIdentityId !== identityId
+        || membershipState.claim.payload.circleId !== req.circleId
+        || membershipState.claim.payload.vpsId !== getServerIdentityRuntimeConfig().vpsId
+      ) {
+        return res.status(400).json({ status: 'error', error: { code: 'INVALID_REQUEST', message: 'Signed self-removal is required' } } as ApiResponse);
+      }
+      const outcome = await disableOwnCircleIdentity({ familyId, identityId, membershipState });
+      if (outcome === 'not_found') return res.status(404).json({ status: 'error', error: { code: 'NOT_FOUND', message: 'Identity not found' } } as ApiResponse);
+      if (outcome === 'forbidden') return res.status(403).json({ status: 'error', error: { code: 'FORBIDDEN', message: 'Circle owner cannot disable their own identity' } } as ApiResponse);
+      if (outcome !== 'updated') return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE', message: 'Self-removal no longer matches Circle state' } } as ApiResponse);
+      try {
+        await suspendIdentityWsAccess(familyId, identityId);
+      } catch (error) {
+        routeLogger.warn('Disabled identity WebSocket suspension failed:', error);
+      }
+      await notifyCircleDirectoryChanged(familyId, 'membership');
+      return res.json({ status: 'ok', result: { identityId, status: 'disabled' } } as ApiResponse);
+    } catch (error) {
+      routeLogger.warn('Disable own Circle identity rejected:', error);
+      return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE', message: 'Unable to commit signed self-removal' } } as ApiResponse);
+    }
+  }
+);
 
 // ---------------------------------------------------------------------------
 // POST /identities/delete-owned-circle - remove a Circle when owner is alone

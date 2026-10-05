@@ -185,7 +185,9 @@ export function enrichMobilePayloadForBinding(
   switch (payload.type) {
     case 'incoming_call': {
       const familyApiBaseUrl = normalizePublicServerUrl(params.publicBaseUrl) || undefined;
-      const declineUrl = familyApiBaseUrl ? `${familyApiBaseUrl}/api/mobile/calls/decline` : undefined;
+      const declineUrl = familyApiBaseUrl
+        ? `${familyApiBaseUrl}/api/mobile/calls/decline${circleId ? `?circleId=${encodeURIComponent(circleId)}` : ''}`
+        : undefined;
       const declineToken = params.targetIdentityId && payload.callSessionId
         ? issueMobileCallActionToken({
             familyId: params.familyId,

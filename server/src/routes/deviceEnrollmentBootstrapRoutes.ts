@@ -13,7 +13,7 @@ import type { TenancyRequest } from '../middleware/tenancy';
 import { configService } from '../services/configService';
 import { deviceEnrollmentRepository } from '../db/repositories/deviceEnrollmentRepository';
 import { deviceRepository, identityRepository } from '../db/repositories';
-import { isTrustedClientOrigin, normalizeTrustedOrigin } from '../utils/trustedOrigins';
+import { admittedDeviceEnrollmentSource } from '../utils/deviceEnrollmentSource';
 import { sendToDeviceWs } from '../ws/wsGateway';
 import {
   encodeDeviceEnrollmentBootstrap,
@@ -154,15 +154,6 @@ router.post('/', rlCreateEnrollment, async (req: TenancyRequest, res) => {
       } as ApiResponse);
     }
 
-    const origin = normalizeTrustedOrigin(req.get('origin'));
-    const originAllowed = isTrustedClientOrigin(origin, familyConfig);
-    if (!originAllowed) {
-      return res.status(403).json({
-        status: 'error',
-        error: { code: 'FORBIDDEN' as ErrorCode, message: 'Origin is not trusted for device enrollment' }
-      } as ApiResponse);
-    }
-
     const requestedTrustedDevice = await deviceRepository.findByDeviceId(familyId, String(trustedDeviceId).trim());
     if (!requestedTrustedDevice || requestedTrustedDevice.status !== 'active') {
       return res.status(404).json({
@@ -175,6 +166,18 @@ router.post('/', rlCreateEnrollment, async (req: TenancyRequest, res) => {
     const normalizedCiphertext = String(newDeviceCiphertext).trim();
     const normalizedCipher = String(cipher).trim();
     const existing = await deviceEnrollmentRepository.findByEnrollmentId(familyId, normalizedEnrollmentId);
+    const enrollmentSource = admittedDeviceEnrollmentSource({
+      originHeader: req.get('origin'),
+      sdkHeader: req.get('x-circlus-sdk'),
+      bootstrapCommitment: existing?.bootstrap_commitment,
+      familyConfig
+    });
+    if (!enrollmentSource) {
+      return res.status(403).json({
+        status: 'error',
+        error: { code: 'FORBIDDEN' as ErrorCode, message: 'Origin is not trusted for device enrollment' }
+      } as ApiResponse);
+    }
     let enrollment;
     if (existing) {
       if (existing.state === 'rejected' || existing.state === 'expired'
@@ -197,7 +200,7 @@ router.post('/', rlCreateEnrollment, async (req: TenancyRequest, res) => {
           requestedTrustedDeviceId: requestedTrustedDevice.device_id,
           newDeviceCiphertext: normalizedCiphertext,
           newDeviceCipher: normalizedCipher,
-          origin: origin!,
+          origin: enrollmentSource,
           requestIp: getRequestIp(req),
           requestUserAgent: String(req.get('user-agent') || '').trim() || null
         });

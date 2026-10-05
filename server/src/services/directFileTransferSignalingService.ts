@@ -48,10 +48,6 @@ export type DirectFileTransferSignalingDependencies = {
   getDeviceSockets: (deviceId: DeviceId) => Set<WebSocket> | undefined;
   sendMessage: (ws: WebSocket, message: WebSocketMessage) => void;
   sendError: (ws: WebSocket, code: string, message: string) => void;
-  resolvePublishedIdentityName: (
-    familyId: string,
-    identity: Awaited<ReturnType<typeof identityRepository.findByIdentityId>>
-  ) => Promise<string | undefined>;
   resolveAccess?: typeof resolveDirectCommunicationAccess;
   touchDirectGuest?: (familyId: string, guestIdentityId: IdentityId) => Promise<void>;
   findIdentity?: typeof identityRepository.findByIdentityId;
@@ -62,13 +58,11 @@ export type DirectFileTransferSignalingDependencies = {
     targetDeviceId: DeviceId;
     targetIdentityId: IdentityId;
     sessionId: DirectFileTransferSessionId;
-    fromIdentityName?: string;
   }) => Promise<void>;
   wakeTargetIdentity?: (params: {
     info: DirectFileTransferConnectionInfo;
     targetIdentityId: IdentityId;
     sessionId: DirectFileTransferSessionId;
-    fromIdentityName?: string;
   }) => Promise<void>;
   notifyTargetIdentityResolution?: (params: {
     familyId: string;
@@ -263,14 +257,9 @@ export class DirectFileTransferSignalingService {
       })
     );
 
-    const fromIdentity = await (
-      this.dependencies.findIdentity || identityRepository.findByIdentityId.bind(identityRepository)
-    )(info.familyId, info.identityId);
-    const fromIdentityName = await this.dependencies.resolvePublishedIdentityName(info.familyId, fromIdentity);
     const incomingData: WSDirectFileTransferIncomingData = {
       sessionId,
       fromIdentityId: info.identityId,
-      fromIdentityName,
       ...(info.identityId === targetIdentityId ? { fromDeviceId: info.deviceId } : {}),
       metadata,
       offer
@@ -303,8 +292,7 @@ export class DirectFileTransferSignalingService {
       await (this.dependencies.wakeTargetIdentity || ((params) => this.wakeTargetIdentity(params)))({
         info,
         targetIdentityId,
-        sessionId,
-        fromIdentityName
+        sessionId
       });
       for (const targetWs of eligibleTargetSockets) this.sendIncoming(targetWs, incomingData);
       return;
@@ -321,8 +309,7 @@ export class DirectFileTransferSignalingService {
         info,
         targetDeviceId: target.targetDeviceId,
         targetIdentityId,
-        sessionId,
-        fromIdentityName
+        sessionId
       })));
     for (const targetWs of eligibleTargetSockets) {
       const targetInfo = this.dependencies.getConnectionInfo(targetWs);
@@ -402,7 +389,6 @@ export class DirectFileTransferSignalingService {
     const connectedTargetDeviceIds = new Set([...eligibleTargetSockets].map((targetWs) => (
       this.dependencies.getConnectionInfo(targetWs)?.deviceId
     )).filter(Boolean));
-    const fromIdentityName = session.incomingData.fromIdentityName;
     if (targetDeviceIds.length > 0) {
       await Promise.all(targetDeviceIds
         .filter((deviceId) => !connectedTargetDeviceIds.has(deviceId))
@@ -412,15 +398,13 @@ export class DirectFileTransferSignalingService {
           info,
           targetDeviceId,
           targetIdentityId: session.targetIdentityId,
-          sessionId,
-          fromIdentityName
+          sessionId
         })));
     } else if (eligibleTargetSockets.size === 0) {
       await (this.dependencies.wakeTargetIdentity || ((params) => this.wakeTargetIdentity(params)))({
         info,
         targetIdentityId: session.targetIdentityId,
-        sessionId,
-        fromIdentityName
+        sessionId
       });
     }
   }
@@ -710,7 +694,6 @@ export class DirectFileTransferSignalingService {
     targetDeviceId: DeviceId;
     targetIdentityId: IdentityId;
     sessionId: DirectFileTransferSessionId;
-    fromIdentityName?: string;
   }): Promise<void> {
     try {
       const familyConfig = await configService.requireFamilyConfig(params.info.familyId);
@@ -723,7 +706,6 @@ export class DirectFileTransferSignalingService {
           type: 'direct_file_transfer',
           directFileTransferSessionId: params.sessionId,
           fromIdentityId: params.info.identityId,
-          fromIdentityName: params.fromIdentityName,
           targetIdentityId: params.targetIdentityId,
           targetDeviceId: params.targetDeviceId
         },
@@ -745,14 +727,12 @@ export class DirectFileTransferSignalingService {
     info: DirectFileTransferConnectionInfo;
     targetIdentityId: IdentityId;
     sessionId: DirectFileTransferSessionId;
-    fromIdentityName?: string;
   }): Promise<void> {
     try {
       await sendPushToIdentity(params.info.familyId, params.targetIdentityId, {
         type: 'direct_file_transfer',
         directFileTransferSessionId: params.sessionId,
         fromIdentityId: params.info.identityId,
-        fromIdentityName: params.fromIdentityName,
         targetIdentityId: params.targetIdentityId
       });
     } catch (error) {

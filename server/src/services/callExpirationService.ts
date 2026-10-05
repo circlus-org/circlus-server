@@ -3,7 +3,6 @@ import type { CallSessionId, IdentityId, WebSocketMessage } from '@shared/types'
 import {
   callHistoryRepository,
   callSessionRepository,
-  identityRepository,
   systemEventRepository
 } from '../db/repositories';
 import { sendCallStatusPush } from '../utils/push';
@@ -25,10 +24,6 @@ export type CallExpirationDependencies = {
     sockets: Set<WebSocket> | undefined,
     message: WebSocketMessage
   ) => void;
-  resolvePublishedIdentityName: (
-    familyId: string,
-    identity: any | null
-  ) => Promise<string | undefined>;
   removeRoute: (callSessionId: CallSessionId) => void;
   logger?: Logger;
   now?: () => number;
@@ -107,20 +102,11 @@ export class CallExpirationService {
     params: CallRingingParams
   ): Promise<void> {
     try {
-      const fromIdentity = await identityRepository.findByIdentityId(
-        params.familyId,
-        params.initiatorIdentityId
-      );
-      const fromIdentityName = await this.dependencies.resolvePublishedIdentityName(
-        params.familyId,
-        fromIdentity
-      );
       await sendCallStatusPush(params.familyId, params.targetIdentityId, {
         callSessionId: params.callSessionId,
         callStatus: 'missed',
         callEndReason: 'timeout',
         fromIdentityId: params.initiatorIdentityId,
-        fromIdentityName: params.isTemporaryLinkCall ? undefined : fromIdentityName,
         isTemporaryLinkCall: params.isTemporaryLinkCall,
         callLinkTitle: params.callLinkTitle
       });

@@ -36,11 +36,7 @@ export const usedEnrollmentReadNonces = createNonceStore();
 export const usedEnrollmentActivationNonces = createNonceStore();
 
 export function getRequestIp(req: AuthRequest | TenancyRequest): string | null {
-  const forwarded = req.headers['x-forwarded-for'];
-  const firstForwarded = Array.isArray(forwarded)
-    ? forwarded[0]
-    : String(forwarded || '').split(',')[0]?.trim();
-  return firstForwarded || req.ip || null;
+  return req.ip || null;
 }
 
 export function isEnrollmentExpired(expiresAt: Date): boolean {

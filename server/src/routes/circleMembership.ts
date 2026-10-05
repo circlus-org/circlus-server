@@ -503,6 +503,25 @@ router.post('/profiles/publish', verifySignature, requireActiveIdentity, async (
     }
     const result = await transaction(async (client) => {
       await client.query(`SELECT family_id FROM family_config WHERE family_id = $1 FOR UPDATE`, [req.familyId]);
+      // Serialize profile publication with self-disable and owner disable. A
+      // request may pass auth before either operation revokes this identity.
+      const author = await client.query<{ status: string }>(
+        `SELECT status FROM identities
+          WHERE family_id = $1 AND identity_id = $2 FOR UPDATE`,
+        [req.familyId, ownerIdentityId]
+      );
+      if (author.rows[0]?.status !== 'active') {
+        if (stagedAvatarBlobId) {
+          await client.query(
+            `UPDATE attachment_blobs
+                SET status = CASE WHEN status IN ('deleted', 'expired') THEN status ELSE 'pending_delete' END,
+                    delete_reason = COALESCE(delete_reason, 'failed_commit'), updated_at = NOW()
+              WHERE family_id = $1 AND blob_id = $2 AND uploader_identity_id = $3`,
+            [req.familyId, stagedAvatarBlobId, ownerIdentityId]
+          );
+        }
+        return { inactive: true as const };
+      }
       const lockedEpoch = await client.query<{ epoch: number }>(
         `SELECT epoch FROM circle_profile_epochs WHERE family_id = $1 ORDER BY epoch DESC LIMIT 1`,
         [req.familyId]
@@ -621,6 +640,9 @@ router.post('/profiles/publish', verifySignature, requireActiveIdentity, async (
       }
       return { conflict: false as const, applied: true, profile: mapEncryptedProfile(saved.rows[0]!) };
     });
+    if ('inactive' in result) {
+      return res.status(403).json({ status: 'error', error: { code: 'IDENTITY_DISABLED', message: 'Circle identity is no longer active' } } as ApiResponse);
+    }
     if (result.conflict) {
       return res.status(409).json({ status: 'error', error: { code: 'INVALID_STATE', message: 'Circle profile epoch changed' } } as ApiResponse);
     }

@@ -82,7 +82,6 @@ describe('DirectFileTransferSignalingService device routing', () => {
       getDeviceSockets: () => deviceSockets,
       sendMessage: (ws, message) => messages.push({ ws, message }),
       sendError: (ws, code) => errors.push({ ws, code }),
-      resolvePublishedIdentityName: async () => 'Sender',
       resolveAccess: async () => ({ allowed: true, relation: 'circle_member' }) as any,
       findIdentity: async (_familyId, identityId) => ({
         identity_id: identityId,
@@ -188,7 +187,6 @@ describe('DirectFileTransferSignalingService device routing', () => {
       getDeviceSockets: () => undefined,
       sendMessage: (ws, message) => messages.push({ ws, message }),
       sendError: (ws, code) => errors.push({ ws, code }),
-      resolvePublishedIdentityName: async () => 'Sender',
       resolveAccess: async () => ({ allowed: true, relation: 'circle_member' }) as any,
       findIdentity: async () => ({ identity_id: 'sender', status: 'active' }) as any,
       wakeTargetIdentity: async () => {},

@@ -249,20 +249,11 @@ export class CallAnswerWsHandler {
     initiatorIdentityId: IdentityId
   ): Promise<void> {
     try {
-      const initiator = await identityRepository.findByIdentityId(
-        info.familyId,
-        initiatorIdentityId
-      );
-      const initiatorName = await this.dependencies.resolvePublishedIdentityName(
-        info.familyId,
-        initiator
-      );
       await sendCallStatusPush(info.familyId, info.identityId, {
         callSessionId,
         callStatus: 'answered_elsewhere',
         callEndReason: 'answered_elsewhere',
         fromIdentityId: initiatorIdentityId,
-        fromIdentityName: initiatorName,
         excludeDeviceIds: info.actorType === 'local' ? [info.deviceId] : undefined
       });
     } catch (error) {
@@ -299,17 +290,12 @@ export class CallAnswerWsHandler {
           value: fromIdentity.public_key_value
         }
       : undefined;
-    const fromIdentityName = await this.dependencies.resolvePublishedIdentityName(
-      info.familyId,
-      fromIdentity
-    );
     this.dependencies.sendMessage(initiatorWs, {
       type: 'call:answered',
       data: {
         callSessionId,
         fromIdentityId: info.identityId,
         fromIdentityPublicKey,
-        fromIdentityName,
         answer
       },
       timestamp: this.now()

@@ -402,11 +402,7 @@ export class CallPeerMediaWsHandlers {
             algorithm: identity.public_key_algorithm,
             value: identity.public_key_value
           }
-        : undefined,
-      fromIdentityName: await this.dependencies.resolvePublishedIdentityName(
-        info.familyId,
-        identity
-      )
+        : undefined
     };
   }
 

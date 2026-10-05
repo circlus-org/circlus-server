@@ -70,7 +70,6 @@ function harness(overrides: Partial<WsRegistrationHandlerDependencies> = {}) {
     sendError: jest.fn(),
     touchConnectionLastSeen: jest.fn(async () => undefined),
     isTemporaryCallTargetAllowed: jest.fn(async () => true),
-    resolvePublishedIdentityName: jest.fn(async () => undefined),
     replayStoredIceCandidates: jest.fn(),
     callSessionRouting,
     describeSocket: jest.fn(() => ({ actorType: 'local' })),

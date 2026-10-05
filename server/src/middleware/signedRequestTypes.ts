@@ -160,6 +160,7 @@ export const HTTP_SIGNED_REQUEST_TYPES: Readonly<Record<string, string>> = Objec
   "POST /api/identities/avatar/get": "identities:avatar:get",
   "POST /api/identities/delete-owned-circle": "identity:delete-owned-circle",
   "POST /api/identities/delete-self": "identity:delete-self",
+  "POST /api/identities/disable-self": "identity:disable-self",
   "POST /api/identities/presence-visibility": "identities:presence-visibility",
   "POST /api/circle-membership/directory": "circle-membership:directory",
   "POST /api/identities/presence-settings": "identities:presence-settings",
