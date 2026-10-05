@@ -120,7 +120,11 @@ const wss = new WebSocketServer({
         return { allowed: false as const, reason: 'missing_host', host: null, familyId: null, origin };
       }
 
-      const circleContext = await resolveCircleContextFromHost(host, getRequestedCircleId(info.req));
+      const requestedCircleId = getRequestedCircleId(info.req);
+      if (!requestedCircleId) {
+        return { allowed: false as const, reason: 'missing_circle_id', host, familyId: null, origin };
+      }
+      const circleContext = await resolveCircleContextFromHost(host, requestedCircleId);
       if (!circleContext) {
         return { allowed: false as const, reason: 'circle_not_found', host, familyId: null, origin };
       }
@@ -138,6 +142,8 @@ const wss = new WebSocketServer({
         lease.release();
         logger.warn('ws_connection_rejected', {
           reason: result.allowed ? 'handshake_expired' : result.reason,
+          operation: 'ws_handshake',
+          missingFields: !result.allowed && result.reason === 'missing_circle_id' ? ['circleId'] : [],
           host: result.host,
           familyId: result.familyId,
           origin: result.origin
@@ -150,7 +156,11 @@ const wss = new WebSocketServer({
       done(true);
     }).catch((error) => {
       lease.release();
-      logger.warn('ws_origin_validation_failed', { error });
+      logger.warn('ws_connection_rejected', {
+        operation: 'ws_handshake',
+        reason: error instanceof Error && error.message === 'CIRCLE_ID_SELECTOR_MISMATCH'
+          ? 'circle_id_selector_mismatch' : 'origin_validation_failed'
+      });
       done(false, 403, 'Forbidden');
     });
   }

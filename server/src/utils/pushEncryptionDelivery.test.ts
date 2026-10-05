@@ -152,6 +152,20 @@ describe('encrypted push delivery invariant', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test('does not route a payload claiming another Circle to the recipient devices', async () => {
+    const { sendPushToIdentity } = await importPushModule();
+    const { configService } = await import('../services/configService');
+    (configService.requireFamilyConfig as jest.Mock).mockResolvedValue({
+      circle_id: 'circle_1', public_base_url: 'https://family.example.test', server_name: 'Family'
+    });
+    await expect(sendPushToIdentity(
+      'family_1', 'identity_1' as any,
+      { type: 'incoming_message', circleId: 'circle_2', messageId: 'msg_1' }
+    )).rejects.toThrow('PUSH_ROUTE_CONTEXT_INVALID');
+    expect(repositories.deviceRepository.findActiveByIdentityId).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test('sends only an encrypted envelope for web relay subscriptions with an encryption key', async () => {
     repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue(null);
     repositories.pushSubscriptionRepository.findActiveByDeviceId.mockResolvedValue([
@@ -195,6 +209,18 @@ describe('encrypted push delivery invariant', () => {
     });
     expect(JSON.stringify(body)).not.toContain('Alice');
     expect(JSON.stringify(body)).not.toContain('msg_1');
+  });
+
+  test('stops an incoming call push before delivery when the call route is incomplete', async () => {
+    const { sendPushToDevice } = await importPushModule();
+    await expect(sendPushToDevice(
+      'family_1', 'device_1' as any, { type: 'incoming_call' },
+      'identity_1' as any, 'https://family.example.test',
+      'https://family.example.test', 'circle_1', 'Family Server'
+    )).rejects.toThrow('PUSH_ROUTE_CONTEXT_INVALID');
+    expect(repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId).not.toHaveBeenCalled();
+    expect(repositories.pushSubscriptionRepository.findActiveByDeviceId).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test('marks incoming calls as high urgency while keeping the relay payload encrypted', async () => {
@@ -326,7 +352,7 @@ describe('encrypted push delivery invariant', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test('sends mobile push using the encryption key stored on the binding', async () => {
+  test('encrypts an incoming call push without a target device id', async () => {
     repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({
       route: 'mobile_push',
       mobile_endpoint_id: null,
@@ -343,7 +369,7 @@ describe('encrypted push delivery invariant', () => {
     const result = await sendPushToDevice(
       'family_1',
       'device_1' as any,
-      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice' },
+      { type: 'incoming_call', callSessionId: 'call_1', fromIdentityName: 'Alice' },
       'identity_1' as any,
       'https://family.example.test',
       'https://family.example.test',
@@ -353,8 +379,9 @@ describe('encrypted push delivery invariant', () => {
 
     expect(encryptPushPayloadMock).toHaveBeenCalledWith(
       'binding-spki-public-key',
-      expect.objectContaining({ messageId: 'msg_1' })
+      expect.objectContaining({ callSessionId: 'call_1', targetIdentityId: 'identity_1', circleId: 'server_1' })
     );
+    expect(encryptPushPayloadMock.mock.calls[0][1]).not.toHaveProperty('targetDeviceId');
     expect(result).toMatchObject({
       attempted: 1,
       sent: 1,

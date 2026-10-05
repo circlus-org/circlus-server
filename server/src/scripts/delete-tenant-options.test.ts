@@ -39,7 +39,8 @@ describe('delete tenant CLI options', () => {
 
   it('never chooses an arbitrary Circle when a host is shared', () => {
     const domains = [{ family_id: 'family_a' }, { family_id: 'family_b' }];
-    expect(() => selectTenantDomain(domains, null)).toThrow('Multiple Circles use this host');
+    expect(() => selectTenantDomain(domains, null)).toThrow('Specify --family-id');
+    expect(() => selectTenantDomain([domains[0]], null)).toThrow('Specify --family-id');
     expect(selectTenantDomain(domains, 'family_b')).toBe(domains[1]);
     expect(() => selectTenantDomain(domains, 'family_other')).toThrow('not assigned to this host');
   });

@@ -67,6 +67,40 @@ describe('incoming call decline routing', () => {
   });
 });
 
+describe('push route context', () => {
+  const binding = { bound_web_origin: 'https://app.circlus.example' };
+  const route = {
+    familyId: 'family-1', targetIdentityId: 'recipient-1',
+    publicBaseUrl: 'https://shared.example', serverOrigin: 'https://shared.example',
+    circleId: 'circle-1', serverDisplayHint: 'Family', vpsId: 'vps-1'
+  };
+
+  test('rejects a payload addressed to another Circle or identity', () => {
+    expect(() => enrichMobilePayloadForBinding(
+      { type: 'incoming_call', circleId: 'circle-2' }, binding, route
+    )).toThrow('PUSH_ROUTE_CIRCLE_MISMATCH');
+    expect(() => enrichMobilePayloadForBinding(
+      { type: 'incoming_call', targetIdentityId: 'recipient-2' }, binding, route
+    )).toThrow('PUSH_ROUTE_IDENTITY_MISMATCH');
+  });
+
+  test('regenerates call action URLs from the resolved Circle route', () => {
+    const enriched = enrichMobilePayloadForBinding({
+      type: 'incoming_call', callSessionId: 'call-1',
+      openUrl: 'https://app.circlus.example/?circleId=circle-2',
+      declineUrl: 'https://shared.example/api/mobile/calls/decline?circleId=circle-2'
+    }, binding, { ...route, targetIdentityId: undefined });
+    expect(new URL(enriched.openUrl!).searchParams.get('circleId')).toBe('circle-1');
+    expect(new URL(enriched.declineUrl!).searchParams.get('circleId')).toBe('circle-1');
+  });
+
+  test('does not recover a missing resolved Circle ID from the payload', () => {
+    expect(() => enrichMobilePayloadForBinding(
+      { type: 'incoming_call', circleId: 'circle-1' }, binding, { ...route, circleId: '' }
+    )).toThrow('PUSH_ROUTE_CONTEXT_MISSING');
+  });
+});
+
 describe('channel publication push navigation', () => {
   test('opens the owner Circle directly on the Channels section', () => {
     const url = buildWebOpenUrl({

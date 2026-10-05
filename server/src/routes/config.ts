@@ -108,7 +108,7 @@ router.get('/capabilities', rlCapabilities, async (req: TenancyRequest, res) => 
     const resolvedConfig = await configService.getResolvedFamilyConfig(familyId);
     const requestHost = getRequestHost(req);
     const acceptedDomain = requestHost
-      ? await familyDomainRepository.findActiveByHost(requestHost, resolvedConfig.config?.circle_id)
+      ? await familyDomainRepository.findActiveByHost(requestHost, resolvedConfig.config!.circle_id)
       : null;
     const publicSiteEligible = !isBlockedManagedHost(requestHost);
     const siteSettings = await circleSiteSettingsRepository.findByFamilyId(familyId);

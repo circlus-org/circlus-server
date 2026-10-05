@@ -3,6 +3,7 @@ import { familyDomainRepository } from '../db/repositories/familyDomainRepositor
 import { getSecurityRuntimeConfig } from '../config/serverRuntimeConfig';
 import { getRequestLogger, updateRequestContext } from './requestContext';
 import { getGlobalTrustedClientOrigins, normalizeTrustedOrigin } from '../utils/trustedOrigins';
+import { isTrustedClientRequestOrigin } from './security';
 
 export interface TenancyRequest extends Request {
   familyId?: string;
@@ -76,14 +77,23 @@ export function getRequestHost(req: HostReadableRequest): string | null {
 }
 
 export function getRequestedCircleId(req: HostReadableRequest & { url?: string }): string | null {
-  const header = readHeader(req, 'x-circlus-circle-id');
-  if (header) return String(header).trim() || null;
-  if (!req.url) return null;
-  try {
-    return new URL(req.url, 'http://localhost').searchParams.get('circleId')?.trim() || null;
-  } catch {
-    return null;
+  const rawHeader = req.headers?.['x-circlus-circle-id'];
+  if (Array.isArray(rawHeader) && rawHeader.length > 1) throw new Error('CIRCLE_ID_SELECTOR_MISMATCH');
+  const header = String(readHeader(req, 'x-circlus-circle-id') || '').trim();
+  let queryCircleId = '';
+  if (req.url) {
+    try {
+      const values = new URL(req.url, 'http://localhost').searchParams.getAll('circleId');
+      if (values.length > 1) throw new Error('CIRCLE_ID_SELECTOR_MISMATCH');
+      queryCircleId = values[0]?.trim() || '';
+    } catch (error) {
+      if (error instanceof Error && error.message === 'CIRCLE_ID_SELECTOR_MISMATCH') throw error;
+    }
   }
+  if (header.includes(',') || (header && queryCircleId && header !== queryCircleId)) {
+    throw new Error('CIRCLE_ID_SELECTOR_MISMATCH');
+  }
+  return header || queryCircleId || null;
 }
 
 function applyUnavailableCircleCors(
@@ -136,13 +146,43 @@ export async function tenancyMiddleware(
     }
 
     const requestedCircleId = getRequestedCircleId(req);
-    const resolution = await familyDomainRepository.resolveActiveFamily(host, requestedCircleId);
-    if (resolution.kind === 'ambiguous') {
-      return res.status(409).json({
+    if (!requestedCircleId) {
+      if (req.method === 'OPTIONS') {
+        // Browser preflight carries the header name, never its Circle ID value.
+        // Check the origin against hosted Circles without selecting a tenant.
+        const origin = req.get('origin');
+        const candidates = (await familyDomainRepository.listByHost(host))
+          .filter((domain) => domain.status === 'active');
+        if (candidates.length > 0) {
+          const trusted = !origin || (await Promise.all(
+            candidates.map((domain) => isTrustedClientRequestOrigin(origin, domain.family_id))
+          )).some(Boolean);
+          if (!trusted || !applyUnavailableCircleCors(req, res, origin ? [origin] : [])) {
+            return res.status(403).end();
+          }
+          return res.status(204).end();
+        }
+        const unavailableDomain = await familyDomainRepository.findDeletedByHost(host, null)
+          || await familyDomainRepository.findSuspendedByHost(host, null);
+        if (unavailableDomain) {
+          const allowed = applyUnavailableCircleCors(req, res, unavailableDomain.extra_trusted_client_origins || []);
+          return allowed ? res.status(204).end() : res.status(403).end();
+        }
+        return res.status(404).json({
+          status: 'error',
+          error: { code: 'UNKNOWN_FAMILY_DOMAIN', message: 'Host is not mapped to a family domain' }
+        });
+      }
+      getRequestLogger({ subsystem: 'tenancy' }).warn('circle_route_context_missing', {
+        operation: 'tenancyMiddleware', reason: 'missing_route_fields',
+        missingFields: ['circleId'], host, path: req.path
+      });
+      return res.status(400).json({
         status: 'error',
-        error: { code: 'CIRCLE_ID_REQUIRED', message: 'This origin hosts multiple Circles; specify X-Circlus-Circle-ID' }
+        error: { code: 'CIRCLE_ID_REQUIRED', message: 'Specify X-Circlus-Circle-ID' }
       });
     }
+    const resolution = await familyDomainRepository.resolveActiveFamily(host, requestedCircleId);
     const familyId = resolution.kind === 'found' ? resolution.familyId : null;
     if (!familyId) {
       const deletedDomain = await familyDomainRepository.findDeletedByHost(host, requestedCircleId);
@@ -210,6 +250,15 @@ export async function tenancyMiddleware(
 
     next();
   } catch (error) {
+    if (error instanceof Error && error.message === 'CIRCLE_ID_SELECTOR_MISMATCH') {
+      getRequestLogger({ subsystem: 'tenancy' }).warn('circle_route_context_invalid', {
+        operation: 'tenancyMiddleware', reason: 'circle_id_selector_mismatch'
+      });
+      return res.status(400).json({
+        status: 'error',
+        error: { code: 'CIRCLE_ID_SELECTOR_MISMATCH', message: 'Circle ID selectors disagree' }
+      });
+    }
     getRequestLogger({ subsystem: 'tenancy' }).error('tenancy_resolution_failed', { error });
     return res.status(500).json({
       status: 'error',
@@ -225,7 +274,7 @@ export async function tenancyMiddleware(
  * Resolve family_id from a host using active family domain mappings.
  * The host will be normalized (lower-case, port stripped).
  */
-export async function resolveFamilyIdFromHost(host: string, circleId?: string | null): Promise<string | null> {
+export async function resolveFamilyIdFromHost(host: string, circleId: string): Promise<string | null> {
   const normalized = normalizeHost(host);
   if (!normalized) return null;
   return familyDomainRepository.findFamilyIdByActiveHost(normalized, circleId);
@@ -233,7 +282,7 @@ export async function resolveFamilyIdFromHost(host: string, circleId?: string | 
 
 export async function resolveCircleContextFromHost(
   host: string,
-  circleId?: string | null
+  circleId: string
 ): Promise<{ familyId: string; circleId: string } | null> {
   const normalized = normalizeHost(host);
   if (!normalized) return null;

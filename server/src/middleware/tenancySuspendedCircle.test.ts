@@ -28,6 +28,7 @@ function request(method = 'GET', path = '/api/messages/list') {
     get: jest.fn((name: string) => {
       if (name.toLowerCase() === 'host') return 'paused.example.test';
       if (name.toLowerCase() === 'origin') return 'https://client.example.test';
+      if (name.toLowerCase() === 'x-circlus-circle-id') return 'circle-paused';
       return undefined;
     })
   };

@@ -248,6 +248,7 @@ router.post('/circles', rlHostProvisioning, async (req, res) => {
       status: 'ok',
       result: {
         familyId,
+        circleId: familyConfig.circle_id,
         host: publicHost,
         publicBaseUrl,
         serverName: familyConfig.server_name,

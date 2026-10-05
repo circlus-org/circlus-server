@@ -15,6 +15,8 @@ import {
 } from '../db/repositories';
 import { mapDirectGuestPermissionsFromDb, normalizeDirectGuestPermissions } from '../services/directGuestAccessService';
 import { attachmentStorageService } from '../services/attachmentStorageService';
+import { configService } from '../services/configService';
+import { normalizePublicServerUrl } from '../utils/serverIdentity';
 import type { ApiResponse, ErrorCode } from '../../../shared/types';
 import type { TenancyRequest } from '../middleware/tenancy';
 import directGuestRegistrationRoutes from './directGuestRegistrationRoutes';
@@ -84,10 +86,6 @@ function normalizeHttpUrl(value: unknown, maxLength: number): string | null {
 function normalizeChannelSlug(value: unknown): string | null {
   const slug = normalizeText(value, PUBLIC_SITE_CHANNEL_SLUG_MAX_LEN)?.toLowerCase() ?? null;
   return slug && PUBLIC_SITE_CHANNEL_SLUG_PATTERN.test(slug) ? slug : null;
-}
-
-function buildRequestBaseUrl(req: AuthRequest): string {
-  return String(req.protocol || 'https') + '://' + String(req.get('host') || '').replace(/\/$/, '');
 }
 
 router.get('/presentation-images/:blobId', async (req: TenancyRequest, res) => {
@@ -396,6 +394,23 @@ router.post('/presentation-image', verifySignature, requireActiveIdentity, relia
       } as ApiResponse);
     }
     if (!(await requireGuestLinkManagementAccess(req, res))) return;
+    const circleId = String((req as TenancyRequest).circleId || '').trim();
+    if (!circleId) {
+      routeLogger.error('direct_guest_image_route_context_missing', {
+        reason: 'missing_route_fields', operation: 'upload_presentation_image', familyId,
+        missingFields: ['circleId']
+      });
+      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Circle context is missing' } });
+    }
+
+    const familyConfig = await configService.requireFamilyConfig(familyId);
+    const publicBaseUrl = normalizePublicServerUrl(familyConfig.public_base_url);
+    if (!publicBaseUrl) {
+      routeLogger.error('direct_guest_image_route_context_invalid', {
+        reason: 'invalid_public_base_url', operation: 'upload_presentation_image', familyId
+      });
+      return res.status(500).json({ status: 'error', error: { code: 'INTERNAL_ERROR', message: 'Circle public URL is invalid' } });
+    }
 
     const payload = getSignedPayload<{ imageBase64?: unknown; mimeType?: unknown; fileName?: unknown }>(req);
     const mimeType = (typeof payload.mimeType === 'string' ? payload.mimeType : '').toLowerCase();
@@ -452,8 +467,9 @@ router.post('/presentation-image', verifySignature, requireActiveIdentity, relia
     });
     await circleFileAccessRepository.grantAccess({ familyId, blobId, purpose: 'direct_guest_link_presentation' });
 
-    const imageUrl = `${buildRequestBaseUrl(req)}/api/direct-guest-links/presentation-images/${encodeURIComponent(blobId)}`;
-    return res.json({ status: 'ok', result: { blobId, imageUrl } } as ApiResponse<{ blobId: string; imageUrl: string }>);
+    const imageUrl = new URL(`${publicBaseUrl}/api/direct-guest-links/presentation-images/${encodeURIComponent(blobId)}`);
+    imageUrl.searchParams.set('circleId', circleId);
+    return res.json({ status: 'ok', result: { blobId, imageUrl: imageUrl.toString() } } as ApiResponse<{ blobId: string; imageUrl: string }>);
   } catch (error) {
     routeLogger.error('Upload direct guest presentation image error:', error);
     return res.status(500).json({

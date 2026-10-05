@@ -57,10 +57,23 @@ describe('getRequestedCircleId', () => {
     })).toBe('circle_beta');
   });
 
-  test('prefers the signed HTTP header over a query parameter', () => {
-    expect(getRequestedCircleId({
+  test('rejects conflicting selectors instead of silently preferring one', () => {
+    expect(() => getRequestedCircleId({
       headers: { 'x-circlus-circle-id': 'circle_header' },
       url: '/api/config?circleId=circle_query'
-    })).toBe('circle_header');
+    })).toThrow('CIRCLE_ID_SELECTOR_MISMATCH');
+  });
+
+  test('rejects duplicate Circle ID headers', () => {
+    expect(() => getRequestedCircleId({
+      headers: { 'x-circlus-circle-id': ['circle_a', 'circle_b'] }
+    })).toThrow('CIRCLE_ID_SELECTOR_MISMATCH');
+  });
+
+  test('rejects duplicate Circle IDs in the query', () => {
+    expect(() => getRequestedCircleId({
+      headers: {},
+      url: '/api/config?circleId=circle_a&circleId=circle_b'
+    })).toThrow('CIRCLE_ID_SELECTOR_MISMATCH');
   });
 });

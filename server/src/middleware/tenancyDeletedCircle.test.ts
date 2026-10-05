@@ -27,6 +27,7 @@ function request(method = 'GET') {
     get: jest.fn((name: string) => {
       if (name.toLowerCase() === 'host') return 'old.example.test';
       if (name.toLowerCase() === 'origin') return 'https://client.example.test';
+      if (name.toLowerCase() === 'x-circlus-circle-id') return 'circle-deleted';
       return undefined;
     })
   };

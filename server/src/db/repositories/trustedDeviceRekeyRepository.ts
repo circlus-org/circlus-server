@@ -9,7 +9,7 @@ export type TrustedDeviceRekeyJob = {
   job_id: string;
   family_id: string;
   identity_id: IdentityId;
-  device_id: string;
+  device_id: string | null;
   reason: TrustedDeviceRekeyReason;
   status: 'pending' | 'processing' | 'completed';
   attempts: number;
@@ -41,7 +41,7 @@ export class TrustedDeviceRekeyRepository {
   async enqueue(client: PoolClient, params: {
     familyId: string;
     identityId: IdentityId;
-    deviceId: string;
+    deviceId: string | null;
     reason: TrustedDeviceRekeyReason;
   }): Promise<TrustedDeviceRekeyEnqueueResult> {
     const jobId = `device_rekey_${nanoid()}`;

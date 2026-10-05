@@ -23,11 +23,28 @@ import {
   sendHttpCallRuntimeMessage
 } from '../ws/wsGateway';
 import type { IdentityId, WebSocketMessage } from '@shared/types';
-import type { TenancyRequest } from '../middleware/tenancy';
+import { getRequestedCircleId, type TenancyRequest } from '../middleware/tenancy';
 import { configService } from '../services/configService';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 
 const router = express.Router();
+
+router.use('/calls', (req: TenancyRequest, res, next) => {
+  const requestedCircleId = getRequestedCircleId(req);
+  if (!requestedCircleId || requestedCircleId !== req.circleId) {
+    routeLogger.warn('mobile_call_route_context_invalid', {
+      operation: 'mobile_call_http_route',
+      reason: requestedCircleId ? 'circle_id_mismatch' : 'missing_route_fields',
+      missingFields: requestedCircleId ? [] : ['circleId'],
+      familyId: req.familyId
+    });
+    return res.status(400).json({
+      status: 'error',
+      error: { code: requestedCircleId ? 'CIRCLE_ID_MISMATCH' : 'CIRCLE_ID_REQUIRED', message: 'Explicit Circle ID is required' }
+    });
+  }
+  next();
+});
 
 function normalizeOrigin(value: string | null | undefined): string | null {
   const s = (value || '').trim();
@@ -223,21 +240,32 @@ router.post('/calls/bootstrap', async (req, res) => {
   const runtimeDeviceId = device.device_id;
 
   const familyConfig = await configService.getFamilyConfig(familyId);
-  const signalingUrl = (() => {
-    try {
-      const base = String(familyConfig?.public_base_url || '').trim() || `${req.protocol}://${req.get('host') || ''}`;
-      const url = new URL(base);
-      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-      url.pathname = '/ws';
-      url.search = '';
-      url.searchParams.set('circleId', familyConfig!.circle_id);
-      url.searchParams.set('vpsId', getServerIdentityRuntimeConfig().vpsId);
-      url.hash = '';
-      return url.toString();
-    } catch {
-      return '';
-    }
-  })();
+  const publicBaseUrl = String(familyConfig?.public_base_url || '').trim();
+  const configuredCircleId = String(familyConfig?.circle_id || '').trim();
+  if (!publicBaseUrl || !configuredCircleId) {
+    routeLogger.error('mobile_call_bootstrap_route_context_missing', {
+      reason: 'missing_route_fields', operation: 'mobile_call_bootstrap', familyId,
+      missingFields: [!publicBaseUrl && 'publicBaseUrl', !configuredCircleId && 'circleId'].filter(Boolean)
+    });
+    return res.status(500).json({ success: false, error: 'Call routing configuration is incomplete' });
+  }
+  let signalingUrl: string;
+  try {
+    const url = new URL(publicBaseUrl);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Invalid publicBaseUrl protocol');
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/ws';
+    url.search = '';
+    url.searchParams.set('circleId', configuredCircleId);
+    url.searchParams.set('vpsId', getServerIdentityRuntimeConfig().vpsId);
+    url.hash = '';
+    signalingUrl = url.toString();
+  } catch {
+    routeLogger.error('mobile_call_bootstrap_route_context_invalid', {
+      reason: 'invalid_public_base_url', operation: 'mobile_call_bootstrap', familyId
+    });
+    return res.status(500).json({ success: false, error: 'Call routing configuration is invalid' });
+  }
 
   // Include the stored SDP offer so the native client can answer without waiting for a WS call:incoming.
   // Strip internal metadata fields (e.g. __externalCaller) before sending to the client.
@@ -273,7 +301,7 @@ router.post('/calls/bootstrap', async (req, res) => {
     callSessionId,
     localIdentityId: token.targetIdentityId,
     deviceId: runtimeDeviceId,
-    circleId: familyConfig!.circle_id,
+    circleId: configuredCircleId,
     vpsId: getServerIdentityRuntimeConfig().vpsId,
     signalingUrl,
     remoteIdentityId,

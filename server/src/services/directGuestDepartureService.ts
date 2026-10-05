@@ -5,6 +5,7 @@ import { identityRepository, systemEventRepository } from '../db/repositories';
 import type { DirectGuestRegistrationRecord } from '../db/repositories/directGuestRegistrationRepository';
 import { configService } from './configService';
 import { verifySignedRequest } from '../utils/crypto';
+import { getRequestLogger } from '../middleware/requestContext';
 
 export class DirectGuestDepartureError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -13,11 +14,21 @@ export class DirectGuestDepartureError extends Error {
 export async function commitDirectGuestDeparture(params: {
   familyId: string; guestIdentityId: string; departure?: DirectGuestDeparture;
 }): Promise<{ registration: DirectGuestRegistrationRecord; event: SystemEventRecord<'direct-guest:departed'> | null; guestEvent: SystemEventRecord<'direct-guest:departed'> | null }> {
+  const proof = params.departure;
+  const registrationId = String(proof?.payload?.registrationId || '').trim();
+  if (!registrationId) {
+    getRequestLogger({ subsystem: 'direct_guest' }).warn('direct_guest_departure_route_context_missing', {
+      operation: 'commitDirectGuestDeparture', reason: 'missing_route_fields',
+      familyId: params.familyId, guestIdentityId: params.guestIdentityId,
+      missingFields: ['registrationId']
+    });
+    throw new DirectGuestDepartureError(400, 'MISSING_REGISTRATION_ID', 'A departure proof with registrationId is required');
+  }
   return transaction((client) => inTransactionContext(client, async () => {
     const rows = await pool.query<DirectGuestRegistrationRecord>(
       `SELECT * FROM direct_guest_registrations WHERE family_id = $1 AND guest_identity_id = $2
-        AND status IN ('active', 'deleted_by_guest') ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-      [params.familyId, params.guestIdentityId],
+        AND registration_id = $3 AND status IN ('active', 'deleted_by_guest') FOR UPDATE`,
+      [params.familyId, params.guestIdentityId, registrationId],
     );
     const registration = rows.rows[0];
     if (!registration) throw new DirectGuestDepartureError(404, 'NOT_FOUND', 'Direct guest registration not found');
@@ -27,7 +38,6 @@ export async function commitDirectGuestDeparture(params: {
     ]);
     const key = identity ? { algorithm: identity.public_key_algorithm, value: identity.public_key_value } as PublicKey : null;
     const origin = config?.public_base_url ? new URL(config.public_base_url).origin : '';
-    const proof = params.departure;
     if (!key || !proof || !matchesDirectGuestDeparture(proof, {
       circleOrigin: origin, registrationId: registration.registration_id, linkId: registration.link_id,
       hostIdentityId: registration.host_identity_id, guestIdentityId: registration.guest_identity_id,

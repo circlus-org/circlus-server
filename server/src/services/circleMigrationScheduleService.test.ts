@@ -150,6 +150,25 @@ describe('Circle migration scheduling', () => {
     expect(circleMigrationRepository.scheduleSourceMigration).toHaveBeenCalled();
   });
 
+  it('rejects an invalid configured source URL before reserving a destination', async () => {
+    (familyConfigRepository.findByFamilyId as jest.Mock).mockResolvedValueOnce({
+      family_id: familyId, status: 'active', owner_identity_id: 'owner_1',
+      public_base_url: 'not a URL'
+    });
+    const signed = signedInput();
+    await expect(circleMigrationScheduleService.schedule({
+      familyId, ownerIdentityId: 'owner_1', migrationId: 'migjob_test',
+      scheduledAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      notifyMembers: true,
+      confirmedDataLoss: {
+        accepted: true,
+        preflightSummaryFingerprint: signed.preflightSummaryFingerprint
+      },
+      ownerSignedMigrationIntent: signed.ownerSignedMigrationIntent
+    })).rejects.toMatchObject({ code: 'INVALID_SOURCE_SERVER_URL' });
+    expect(postCircleMigrationJson).not.toHaveBeenCalled();
+  });
+
   it('rejects confirmation for a different preflight preview', async () => {
     const signed = signedInput();
     await expect(circleMigrationScheduleService.schedule({

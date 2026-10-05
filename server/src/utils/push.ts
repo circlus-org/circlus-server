@@ -26,6 +26,7 @@ import {
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 import { getEffectivePushConfiguration } from '../services/managedPushConfigurationService';
 import { getRequestLogger } from '../middleware/requestContext';
+import { normalizePublicServerUrl } from './serverIdentity';
 
 export type PushDeliveryMode = 'direct' | 'relay';
 
@@ -121,8 +122,37 @@ export async function sendPushToDevice(
   };
 
   try {
-    const urgency = urgencyForPayload(payload);
-    const ttlSec = ttlSecondsForPayload(payload);
+    const missingFields = [
+      !resolvedCircleId && 'circleId',
+      !resolvedServerOrigin && 'serverOrigin',
+      !targetIdentityId && 'targetIdentityId',
+      payload.type === 'incoming_call' && !payload.callSessionId && 'callSessionId',
+      payload.type === 'incoming_call' && !normalizePublicServerUrl(familyPublicBaseUrl) && 'publicBaseUrl'
+    ].filter(Boolean);
+    const mismatchedFields = [
+      payload.circleId && payload.circleId !== resolvedCircleId && 'circleId',
+      payload.targetIdentityId && payload.targetIdentityId !== targetIdentityId && 'targetIdentityId'
+    ].filter(Boolean);
+    if (missingFields.length || mismatchedFields.length) {
+      getRequestLogger({ subsystem: 'push' }).error('push_route_context_invalid', {
+        operation: 'sendPushToDevice', familyId, deviceId,
+        reason: missingFields.length ? 'missing_route_fields' : 'route_field_mismatch',
+        missingFields, mismatchedFields
+      });
+      throw new Error('PUSH_ROUTE_CONTEXT_INVALID');
+    }
+    const routedPayload: PushPayload = {
+      ...payload,
+      openUrl: undefined,
+      declineUrl: undefined,
+      declineToken: undefined,
+      circleId: resolvedCircleId,
+      targetIdentityId,
+      serverOrigin: resolvedServerOrigin,
+      vpsId: getServerIdentityRuntimeConfig().vpsId
+    };
+    const urgency = urgencyForPayload(routedPayload);
+    const ttlSec = ttlSecondsForPayload(routedPayload);
     const activeBinding = await mobileNotificationRepository.getActiveBindingByWebDeviceId(familyId, deviceId);
     if (activeBinding && activeBinding.route === 'mobile_push') {
       const bindingToken = (activeBinding.delivery_token || '').trim();
@@ -142,7 +172,7 @@ export async function sendPushToDevice(
         summary.subscriptionsTotal = 1;
         summary.attempted = 1;
         try {
-          const mobilePayload = enrichMobilePayloadForBinding(payload, activeBinding, {
+          const mobilePayload = enrichMobilePayloadForBinding(routedPayload, activeBinding, {
             familyId,
             targetIdentityId,
             publicBaseUrl: familyPublicBaseUrl,
@@ -219,7 +249,7 @@ export async function sendPushToDevice(
     }
 
     for (const sub of subscriptions) {
-      const payloadWithPushId: PushPayload = { ...payload, pushId: sub.push_id };
+      const payloadWithPushId: PushPayload = { ...routedPayload, pushId: sub.push_id };
       const deliveryMethod = (sub.delivery_method as PushDeliveryMode | undefined) || 'direct';
       summary.attempted += 1;
 
@@ -409,13 +439,29 @@ export async function sendPushToIdentity(
           return resolvedServerOrigin;
         }
       })();
+    const missingFields = [
+      !resolvedCircleId && 'circleId',
+      !resolvedServerOrigin && 'serverOrigin'
+    ].filter(Boolean);
+    const mismatchedFields = [
+      payload.circleId && payload.circleId !== resolvedCircleId && 'circleId',
+      payload.targetIdentityId && payload.targetIdentityId !== identityId && 'targetIdentityId'
+    ].filter(Boolean);
+    if (missingFields.length || mismatchedFields.length) {
+      getRequestLogger({ subsystem: 'push' }).error('push_route_context_invalid', {
+        operation: 'sendPushToIdentity', familyId, identityId,
+        reason: missingFields.length ? 'missing_route_fields' : 'route_field_mismatch',
+        missingFields, mismatchedFields
+      });
+      throw new Error('PUSH_ROUTE_CONTEXT_INVALID');
+    }
     const payloadWithResolvedServerId: PushPayload = {
       ...payload,
-      targetIdentityId: payload.targetIdentityId || identityId,
-      serverOrigin: payload.serverOrigin || resolvedServerOrigin,
-      vpsId: payload.vpsId || getServerIdentityRuntimeConfig().vpsId,
-      circleId: payload.circleId || resolvedCircleId,
-      serverDisplayHint: payload.serverDisplayHint || resolvedServerDisplayHint
+      targetIdentityId: identityId,
+      serverOrigin: resolvedServerOrigin,
+      vpsId: getServerIdentityRuntimeConfig().vpsId,
+      circleId: resolvedCircleId,
+      serverDisplayHint: resolvedServerDisplayHint
     };
 
     // Find all active devices for this identity

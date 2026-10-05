@@ -58,26 +58,26 @@ export class FamilyDomainRepository {
     return result.rows;
   }
 
-  async findActiveByHost(host: string, circleId?: string | null): Promise<DBFamilyDomain | null> {
+  async findActiveByHost(host: string, circleId: string): Promise<DBFamilyDomain | null> {
     const result = await query<DBFamilyDomain>(
       `SELECT fd.*
        FROM family_domains fd
        WHERE fd.host = $1
          AND fd.status = 'active'
-         AND ($2::text IS NULL OR EXISTS (
+         AND EXISTS (
            SELECT 1 FROM family_config fc
            WHERE fc.family_id = fd.family_id AND fc.circle_id = $2
-         ))
+         )
        ORDER BY fd.created_at ASC
        LIMIT 1`,
-      [host, circleId || null]
+      [host, circleId]
     );
     return result.rows[0] || null;
   }
 
-  async resolveActiveFamily(host: string, circleId?: string | null): Promise<
+  async resolveActiveFamily(host: string, circleId: string): Promise<
     | { kind: 'found'; familyId: string; circleId: string }
-    | { kind: 'not_found' | 'ambiguous' }
+    | { kind: 'not_found' }
   > {
     const result = await query<{ family_id: string; circle_id: string }>(
       `SELECT fd.family_id, fc.circle_id
@@ -85,13 +85,12 @@ export class FamilyDomainRepository {
        JOIN family_config fc ON fc.family_id = fd.family_id
        WHERE fd.host = $1
          AND fd.status = 'active'
-         AND ($2::text IS NULL OR fc.circle_id = $2)
+         AND fc.circle_id = $2
        ORDER BY fd.created_at ASC
-       LIMIT 2`,
-      [host, circleId || null]
+       LIMIT 1`,
+      [host, circleId]
     );
     if (result.rows.length === 0) return { kind: 'not_found' };
-    if (!circleId && result.rows.length > 1) return { kind: 'ambiguous' };
     return {
       kind: 'found',
       familyId: result.rows[0]!.family_id,
@@ -99,7 +98,7 @@ export class FamilyDomainRepository {
     };
   }
 
-  async findFamilyIdByActiveHost(host: string, circleId?: string | null): Promise<string | null> {
+  async findFamilyIdByActiveHost(host: string, circleId: string): Promise<string | null> {
     const result = await this.resolveActiveFamily(host, circleId);
     return result.kind === 'found' ? result.familyId : null;
   }

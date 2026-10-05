@@ -3,6 +3,7 @@ import { transaction } from '../db';
 import { trustedDeviceRekeyRepository } from '../db/repositories';
 import { requestTrustedDeviceRekeyProcessing } from './trustedDeviceRekeyService';
 import { appendCircleMembershipState } from './circleMembershipStateService';
+import { getRequestLogger } from '../middleware/requestContext';
 
 export type IdentitySelfDisableResult = 'updated' | 'not_found' | 'forbidden' | 'invalid_state';
 
@@ -40,9 +41,16 @@ export async function disableOwnCircleIdentity(params: {
         WHERE family_id = $1 AND identity_id = $2 AND status = 'active'
         FOR UPDATE`, [familyId, identityId]
     );
+    const rekeyDeviceId = activeDevices.rows[0]?.device_id ?? null;
+    if (!rekeyDeviceId) {
+      getRequestLogger({ subsystem: 'identity' }).warn('identity_self_disable_device_context_missing', {
+        operation: 'disableOwnCircleIdentity', reason: 'no_active_devices',
+        familyId, identityId, missingFields: ['deviceId']
+      });
+    }
     const rekey = await trustedDeviceRekeyRepository.enqueue(client, {
       familyId, identityId,
-      deviceId: activeDevices.rows[0]?.device_id || `identity-self-disable:${identityId}`,
+      deviceId: rekeyDeviceId,
       reason: 'device_revoked'
     });
     // Block group writes at the cutoff, before the asynchronous rekey worker

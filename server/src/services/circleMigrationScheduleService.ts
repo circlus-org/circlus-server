@@ -21,6 +21,7 @@ import {
   type OwnerSignedMigrationIntent
 } from './circleMigrationSlotService';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
+import { getRequestLogger } from '../middleware/requestContext';
 
 const FIXED_DATA_LOSS_POLICY = {
   dropAttachments: true,
@@ -221,6 +222,13 @@ class CircleMigrationScheduleService {
         'Data loss confirmation must match the current preflight summary'
       );
     }
+    const sourceServerUrl = normalizePublicServerUrl(config.public_base_url);
+    if (!sourceServerUrl) {
+      getRequestLogger({ subsystem: 'circle_migration' }).error('circle_migration_route_context_invalid', {
+        operation: 'schedule', reason: 'invalid_public_base_url', familyId: input.familyId
+      });
+      throw new CircleMigrationServiceError(500, 'INVALID_SOURCE_SERVER_URL', 'Circle public URL is invalid');
+    }
     validateLocalOwnerIntent({
       migration,
       ownerIdentityId: input.ownerIdentityId,
@@ -228,7 +236,7 @@ class CircleMigrationScheduleService {
         algorithm: 'ed25519',
         value: owner.public_key_value
       },
-      sourceServerUrl: normalizePublicServerUrl(config.public_base_url) || config.public_base_url,
+      sourceServerUrl,
       intent: input.ownerSignedMigrationIntent,
       preflightSummaryFingerprint
     });

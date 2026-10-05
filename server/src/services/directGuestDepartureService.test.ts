@@ -35,7 +35,7 @@ test('stores the proof and durable events for the host and guest devices in the 
   const departure = proof();
   const result = await commitDirectGuestDeparture({ familyId: 'family', guestIdentityId: 'guest', departure });
   expect(inTransactionContext).toHaveBeenCalledTimes(1);
-  expect(pool.query).toHaveBeenNthCalledWith(1, expect.stringContaining('FOR UPDATE'), ['family', 'guest']);
+  expect(pool.query).toHaveBeenNthCalledWith(1, expect.stringContaining('registration_id = $3'), ['family', 'guest', 'registration']);
   expect(pool.query).toHaveBeenNthCalledWith(2, expect.stringContaining('departure_proof = $3::jsonb'), ['family', 'registration', JSON.stringify(departure)]);
   expect(systemEventRepository.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ recipientIdentityId: 'host', type: 'direct-guest:departed', payload: expect.objectContaining({ departure }) }));
   expect(systemEventRepository.insertEvent).toHaveBeenCalledWith(expect.objectContaining({ recipientIdentityId: 'guest', payload: expect.objectContaining({ departure }) }));
@@ -52,9 +52,21 @@ test.each(['registrationId', 'linkId', 'hostIdentityId', 'guestIdentityId', 'cir
   expect(systemEventRepository.insertEvent).not.toHaveBeenCalled();
 });
 
+
+test('looks up the exact registration named by the signed departure proof', async () => {
+  const departure = proof();
+  departure.payload.registrationId = 'another-registration';
+  await expect(commitDirectGuestDeparture({ familyId: 'family', guestIdentityId: 'guest', departure }))
+    .rejects.toMatchObject({ code: 'INVALID_SIGNATURE' });
+  expect(pool.query).toHaveBeenNthCalledWith(1, expect.stringContaining('registration_id = $3'), [
+    'family', 'guest', 'another-registration'
+  ]);
+  expect(systemEventRepository.insertEvent).not.toHaveBeenCalled();
+});
+
 test('requires a guest identity proof, not just an authenticated device request', async () => {
-  await expect(commitDirectGuestDeparture({ familyId: 'family', guestIdentityId: 'guest' })).rejects.toMatchObject({ code: 'INVALID_SIGNATURE' });
-  expect(pool.query).toHaveBeenCalledTimes(1);
+  await expect(commitDirectGuestDeparture({ familyId: 'family', guestIdentityId: 'guest' })).rejects.toMatchObject({ code: 'MISSING_REGISTRATION_ID' });
+  expect(pool.query).not.toHaveBeenCalled();
 });
 
 test('rejects a forged signature even with a matching payload', async () => {

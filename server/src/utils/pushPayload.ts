@@ -170,8 +170,13 @@ export function enrichMobilePayloadForBinding(
     serverDisplayHint: string;
   }
 ): PushPayload {
-  const serverOrigin = String(params.serverOrigin || payload.serverOrigin || '').trim() || undefined;
-  const circleId = String(params.circleId || payload.circleId || '').trim() || undefined;
+  const serverOrigin = String(params.serverOrigin || '').trim() || undefined;
+  const circleId = String(params.circleId || '').trim() || undefined;
+  if (!serverOrigin || !circleId) throw new Error('PUSH_ROUTE_CONTEXT_MISSING');
+  if (payload.circleId && payload.circleId !== circleId) throw new Error('PUSH_ROUTE_CIRCLE_MISMATCH');
+  if (params.targetIdentityId && payload.targetIdentityId && payload.targetIdentityId !== params.targetIdentityId) {
+    throw new Error('PUSH_ROUTE_IDENTITY_MISMATCH');
+  }
   const serverDisplayHint = String(params.serverDisplayHint || payload.serverDisplayHint || '').trim() || undefined;
   const targetIdentityId = String(params.targetIdentityId || '').trim() as IdentityId || undefined;
   const payloadForRecipient: PushPayload = {
@@ -202,9 +207,9 @@ export function enrichMobilePayloadForBinding(
         ...payloadForRecipient,
         collapseKey: payload.collapseKey || (payload.callSessionId ? `call:${payload.callSessionId}` : undefined),
         displayNameHint: payload.displayNameHint || payload.fromIdentityName,
-        declineUrl: payload.declineUrl || declineUrl,
-        declineToken: payload.declineToken || declineToken,
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        declineUrl,
+        declineToken,
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId,
@@ -216,7 +221,7 @@ export function enrichMobilePayloadForBinding(
       return {
         ...payloadForRecipient,
         collapseKey: payload.collapseKey || (payload.callSessionId ? `call:${payload.callSessionId}` : undefined),
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId,
@@ -233,7 +238,7 @@ export function enrichMobilePayloadForBinding(
           binding.native_message_preview_mode === 'after_unlock'
           ? payload.notificationPreview
           : undefined,
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId,
@@ -252,7 +257,7 @@ export function enrichMobilePayloadForBinding(
       return {
         ...payloadForRecipient,
         collapseKey: payload.collapseKey || `channel-publication:${payload.channelId}`,
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId,
@@ -267,7 +272,7 @@ export function enrichMobilePayloadForBinding(
         collapseKey: payload.collapseKey || `direct-file:${payload.directFileTransferSessionId || ''}`,
         senderDisplayHint: payload.senderDisplayHint || payload.fromIdentityName,
         serverDisplayHint,
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId,
@@ -284,7 +289,7 @@ export function enrichMobilePayloadForBinding(
     default:
       return {
         ...payloadForRecipient,
-        openUrl: payload.openUrl || buildWebOpenUrl({
+        openUrl: buildWebOpenUrl({
           webOrigin: binding.bound_web_origin,
           serverOrigin,
           circleId

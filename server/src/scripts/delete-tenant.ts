@@ -44,6 +44,15 @@ async function main() {
 
   try {
     const domains = await familyDomainRepository.listByHost(host);
+    if (domains.length === 0) throw new Error('No Circle is configured for this host');
+    if (!options.familyId) {
+      console.log(`Circles configured for ${host}:`);
+      for (const familyId of new Set(domains.map((domain) => domain.family_id))) {
+        console.log(`Family ID: ${familyId}`);
+      }
+      console.log('Specify --family-id to inspect a Circle. No data was changed.');
+      return;
+    }
     const domain = selectTenantDomain(domains, options.familyId);
     const circle = await familyConfigRepository.findByFamilyId(domain.family_id);
     if (!circle) throw new Error(`Circle ${domain.family_id} has no configuration row`);

@@ -36,12 +36,9 @@ export function selectTenantDomain<T extends { family_id: string }>(
     if (!selected) throw new Error('The requested family ID is not assigned to this host');
     return selected;
   }
-  if (domains.length > 1) {
-    throw new Error(
-      `Multiple Circles use this host; repeat with --family-id. Available Family IDs: ${domains.map((domain) => domain.family_id).join(', ')}`
-    );
-  }
-  return domains[0]!;
+  throw new Error(
+    `Specify --family-id to select a Circle on this host. Available Family IDs: ${domains.map((domain) => domain.family_id).join(', ')}`
+  );
 }
 
 export function confirmTenantDeletion(expectedFamilyId: string, confirmation: string | null): boolean {

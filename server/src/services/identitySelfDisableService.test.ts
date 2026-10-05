@@ -17,10 +17,10 @@ const membershipState = {
   admission: null
 } as any;
 
-function arrangeIdentity(role = 'member', status = 'active') {
+function arrangeIdentity(role = 'member', status = 'active', deviceRows = [{ device_id: 'device-1' }]) {
   const query = jest.fn()
     .mockResolvedValueOnce({ rows: [{ role, status }] })
-    .mockResolvedValueOnce({ rows: [{ device_id: 'device-1' }] })
+    .mockResolvedValueOnce({ rows: deviceRows })
     .mockResolvedValue({ rowCount: 1 });
   const client = { query };
   (transaction as jest.Mock).mockImplementation(async (run) => run(client));
@@ -49,6 +49,15 @@ describe('disableOwnCircleIdentity', () => {
     expect(statements.findIndex((sql) => sql.includes('rekey_required_at =')))
       .toBeLessThan(statements.findIndex((sql) => sql.includes('UPDATE group_chat_participants')));
     expect(requestTrustedDeviceRekeyProcessing).toHaveBeenCalledTimes(1);
+  });
+
+  it('records an identity-level rekey without inventing a device ID', async () => {
+    const { client } = arrangeIdentity('member', 'active', []);
+    const result = await disableOwnCircleIdentity({ familyId: 'family', identityId: 'member', membershipState });
+    expect(result).toBe('updated');
+    expect(trustedDeviceRekeyRepository.enqueue).toHaveBeenCalledWith(client, {
+      familyId: 'family', identityId: 'member', deviceId: null, reason: 'device_revoked'
+    });
   });
 
   it('removes live capabilities but preserves recoverable and shared records', async () => {
