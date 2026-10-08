@@ -48,7 +48,12 @@ Disable them again after collecting the needed information.
 ## Client Origins
 
 `https://web.circlus.org`, the official web client, may always call the API from
-browsers. This origin is built in and no setting removes it.
+browsers. So may `org.circlus.client://app`, the web client bundled inside the
+iOS app: `WKWebView` serves bundled files only from a custom scheme, and WebKit
+sends that Origin. Both are built in and no setting removes them. Configured
+origins must be `http(s)`. An Origin header protects browser users against other
+web pages; it does not authenticate a client, because any native program can
+send any value. Requests are authorized by device signatures.
 `TRUSTED_CLIENT_ORIGINS` adds custom client origins globally; configure only web
 clients you operate or trust. A Circle owner can also add origins for one Circle
 through `extra_trusted_client_origins`.

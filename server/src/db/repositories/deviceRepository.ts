@@ -111,12 +111,18 @@ export class DeviceRepository {
   /**
    * Update last_seen_at timestamp
    */
-  async updateLastSeen(familyId: string, deviceId: DeviceId, webOrigin?: string | null): Promise<void> {
+  async updateLastSeen(
+    familyId: string,
+    deviceId: DeviceId,
+    webOrigin?: string | null,
+    clientVersion?: string | null
+  ): Promise<void> {
     await pool.query(
       `WITH touched AS (
          UPDATE devices
             SET last_seen_at = NOW(),
                 web_origin = COALESCE($3, web_origin),
+                client_version = COALESCE($4, client_version),
                 inactivity_warning_sent_at = NULL
           WHERE device_id = $1
             AND family_id = $2
@@ -129,7 +135,7 @@ export class DeviceRepository {
           AND event.recipient_identity_id = touched.identity_id
           AND event.type = 'device:inactivity-warning'
           AND event.payload->>'deviceId' = $1`,
-      [deviceId, familyId, webOrigin ?? null]
+      [deviceId, familyId, webOrigin ?? null, clientVersion ?? null]
     );
   }
 

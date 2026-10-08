@@ -66,7 +66,8 @@ export function createCorsOptions(): CorsOptionsDelegate<TenancyRequest> {
         'X-Inspector-Request-Token',
         'X-Inspector-Session-Pickup',
         'X-Request-ID',
-        'X-Circlus-Circle-ID'
+        'X-Circlus-Circle-ID',
+        'X-Circlus-Client-Version'
       ],
       exposedHeaders: ['X-Request-ID', 'X-Circlus-Circle-Suspended'],
       maxAge: 600

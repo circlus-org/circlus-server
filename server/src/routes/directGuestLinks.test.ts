@@ -17,6 +17,7 @@ jest.mock('../middleware/auth', () => ({
 
 jest.mock('../db', () => ({
   pool: { query: jest.fn() },
+  afterCommit: jest.fn((callback: () => void) => callback()),
   inTransactionContext: jest.fn(async (_client: unknown, callback: () => unknown) => callback()),
   transaction: jest.fn(async (callback: (client: unknown) => Promise<unknown>) => callback({ query: jest.fn() })),
 }));
@@ -556,6 +557,9 @@ describe('direct guest link host restrictions', () => {
         })
       })
     }));
+    expect(require('../db').afterCommit).toHaveBeenCalled();
+    expect(require('../ws/wsGateway').sendToIdentityWs).toHaveBeenCalledWith('family_1', 'host_identity',
+      expect.objectContaining({ type: 'direct-guest:permissions-changed', data: expect.objectContaining({ registrationId: 'reg_1' }) }));
   });
 
   test('requires guest acceptance before enabling chat for a channel subscriber', async () => {

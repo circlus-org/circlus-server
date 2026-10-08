@@ -9,7 +9,7 @@ import {
   directGuestRegistrationRepository
 } from '../db/repositories';
 import { mapDirectGuestPermissionsFromDb } from '../services/directGuestAccessService';
-import type { ApiResponse, ErrorCode } from '../../../shared/types';
+import type { ApiResponse, ErrorCode, IdentityId } from '../../../shared/types';
 import {
   canUseGuestServerAttachments,
   mapDirectGuestRegistrationResponse,
@@ -27,6 +27,7 @@ import {
 import { commitDirectGuestDeparture, DirectGuestDepartureError } from '../services/directGuestDepartureService';
 import type { DirectGuestDeparture } from '../../../shared/directGuestDeparture';
 import { sendToIdentityWs } from '../ws/wsGateway';
+import { notifyDirectGuestPermissionsChanged } from '../services/realtimeRefreshHints';
 
 const router = Router();
 // Read only the authenticated actor's relationship, never arbitrary registrations.
@@ -400,6 +401,12 @@ router.post('/registrations/:registrationId/permissions/update', verifySignature
         error: { code: 'NOT_FOUND' as ErrorCode, message: 'Direct guest registration not found' }
       } as ApiResponse);
     }
+
+    notifyDirectGuestPermissionsChanged(familyId, {
+      registrationId: updated.registration_id,
+      hostIdentityId: hostIdentityId as IdentityId,
+      guestIdentityId: updated.guest_identity_id as IdentityId,
+    });
 
     return res.json({
       status: 'ok',

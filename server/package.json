@@ -1,6 +1,6 @@
 {
   "name": "circlus-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Self-hosted Circlus server for private circles, messaging, and WebRTC calls",
   "main": "dist/server/src/index.js",
   "scripts": {

@@ -34,7 +34,7 @@ import {
   getServerIdentityRuntimeConfig
 } from '../config/serverRuntimeConfig';
 import { loadPlatformRecoveryRuntimeConfig } from '../config/platformRecoveryRuntimeConfig';
-import { CAPABILITIES_DOCUMENT_VERSION, SIGNED_PROTOCOL_VERSIONS } from '../../../shared/protocolVersions';
+import { CAPABILITIES_DOCUMENT_VERSION, SIGNED_PROTOCOL_RANGES, SIGNED_PROTOCOL_VERSIONS } from '../../../shared/protocolVersions';
 import {
   verifySignature as verifyEd25519Signature,
   verifySignedRequest
@@ -72,7 +72,8 @@ const rlCapabilities = createRateLimiter({
 });
 
 const SERVER_VERSION = String((serverPackage as { version?: string }).version || '0.0.0');
-const SERVER_API_LEVEL = 3;
+// 4: accepts the X-Circlus-Client-Version header (CLIENT_SERVER_COMPATIBILITY.md).
+const SERVER_API_LEVEL = 4;
 
 /** Lightweight tenant/lifecycle probe used by foreground supervisors. */
 router.get('/lifecycle', rlCapabilities, async (req: TenancyRequest, res) => {
@@ -118,6 +119,7 @@ router.get('/capabilities', rlCapabilities, async (req: TenancyRequest, res) => 
       vpsId: getServerIdentityRuntimeConfig().vpsId,
       capabilitiesVersion: CAPABILITIES_DOCUMENT_VERSION,
       protocols: SIGNED_PROTOCOL_VERSIONS,
+      protocolRanges: SIGNED_PROTOCOL_RANGES,
       apiLevel: SERVER_API_LEVEL,
       serverVersion: SERVER_VERSION,
       enabled: {

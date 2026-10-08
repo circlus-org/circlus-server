@@ -9,3 +9,4 @@ deploy/secrets/
 ice_config_service/secrets/
 .git
 .gitignore
+backups/

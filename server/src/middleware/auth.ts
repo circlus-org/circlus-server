@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { deviceRepository, identityRepository, serverAdminRepository, temporaryDeviceRepository } from '../db/repositories';
 import { verifySignedRequest } from '../utils/crypto';
 import { normalizeTrustedOrigin } from '../utils/trustedOrigins';
+import { CLIENT_VERSION_HEADER, normalizeClientVersion } from '../utils/clientVersion';
 import type { SignedRequest, ErrorCode, DeviceId } from '../../../shared/types';
 import { bumpChatEpochsForTemporaryDevice } from '../services/chatEpochRotation';
 import { getSecurityRuntimeConfig, getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
@@ -287,7 +288,12 @@ export async function verifySignature<T = unknown>(
     // Technical device activity only. User-visible presence is advanced solely
     // by the explicit foreground heartbeat in routes/status.ts.
     if (device) {
-      await deviceRepository.updateLastSeen(familyId, device.device_id, normalizeTrustedOrigin(req.get('origin')));
+      await deviceRepository.updateLastSeen(
+        familyId,
+        device.device_id,
+        normalizeTrustedOrigin(req.get('origin')),
+        normalizeClientVersion(req.get(CLIENT_VERSION_HEADER))
+      );
     } else if (temporaryDevice) {
       await temporaryDeviceRepository.updateLastSeen(familyId, temporaryDevice.device_id);
     }

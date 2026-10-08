@@ -1,3 +1,4 @@
+import { SIGNED_PROTOCOL_RANGES } from '../../../shared/protocolVersions';
 jest.mock('../services/durableNonce', () => { const used = new Set<string>(); return { claimDurableNonce: jest.fn(async (signer: string, nonce: string) => {const key = signer+':'+nonce;if (used.has(key)) return false;used.add(key);return true;}) }; });
 jest.mock('../db/repositories', () => ({
   deviceRepository: { findByDeviceId: jest.fn() },
@@ -85,7 +86,8 @@ describe('GET /capabilities: public circle site eligibility', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({
-          apiLevel: 3,
+          apiLevel: 4,
+          protocolRanges: SIGNED_PROTOCOL_RANGES,
           enabled: { platformRecoveryV1: false },
           canonical: expect.objectContaining({ publicSiteEligible: true, publicSiteEnabled: true }),
         }),

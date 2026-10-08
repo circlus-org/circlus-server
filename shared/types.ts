@@ -1294,15 +1294,21 @@ export type ServerFeatureKey =
   | 'publicCircleSite'
   | 'memberRemoval'
   | 'platformRecoveryV1'
-  | 'membershipSnapshots';
+  | 'membershipSnapshots'
+  | 'clientVersionReport';
 
 export interface ServerCapabilitiesResponse {
   circleId: CircleId;
   vpsId: VpsId;
   /** Schema of this capabilities document, independent from feature API level. */
   capabilitiesVersion: typeof import('./protocolVersions').CAPABILITIES_DOCUMENT_VERSION;
-  /** Exact versions of security-sensitive signed protocols accepted by this Circle. */
+  /**
+   * Current versions of the signed protocols. Clients released before version
+   * ranges existed require these to match exactly, so the field stays.
+   */
   protocols: import('./protocolVersions').SignedProtocolVersions;
+  /** Versions accepted per signed protocol. */
+  protocolRanges?: import('./protocolVersions').SignedProtocolRanges;
   /**
    * Monotonically increasing server API level. A newer level contains all
    * capabilities of the lower levels.
@@ -1552,6 +1558,20 @@ export interface WSCircleDirectoryChangedData {
   changedAt: number;
 }
 
+/** Wake-up hint only: recipients re-read presence through the signed status:get API. */
+export interface WSPresenceVisibilityChangedData {
+  identityId: IdentityId;
+  changedAt: number;
+}
+
+/** Wake-up hint only: both peers re-read the registration through its signed API. */
+export interface WSDirectGuestPermissionsChangedData {
+  registrationId: string;
+  hostIdentityId: IdentityId;
+  guestIdentityId: IdentityId;
+  changedAt: number;
+}
+
 export interface WSTemporaryAccessGrantReadyData {
   requestId: string;
   enrollmentId: string;
@@ -1598,6 +1618,8 @@ export type WSMessageType =
   | 'temporary-access:trusted-request-created'
   | 'temporary-access:grant-ready'
   | 'circle:directory-changed'
+  | 'presence:visibility-changed'
+  | 'direct-guest:permissions-changed'
   | 'attachment:metadata-updated'
   | 'group:chat-updated'
   | 'group:message:deliver'

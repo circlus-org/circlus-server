@@ -10,6 +10,7 @@ import {
 import { attachmentStorageService } from '../services/attachmentStorageService';
 import { publicSiteAssetStorageService } from '../services/publicSiteAssetStorageService';
 import { deleteIdentityDataFromCircle, IdentityDeletionServiceError } from '../services/identityDeletionService';
+import { notifyPresenceVisibilityChanged } from '../services/realtimeRefreshHints';
 import { notifyCircleServerDataDeleted, notifyIdentityServerDataDeleted, suspendIdentityWsAccess } from '../ws/wsGateway';
 import { verifySignature, requireActiveIdentity, requireFullCircleIdentity, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
@@ -378,6 +379,7 @@ router.post(
       }
 
       const presenceVisible = await identityRepository.updatePresenceVisible(familyId, identityId, payload.presenceVisible);
+      notifyPresenceVisibilityChanged(familyId, identityId);
 
       return res.json({
         status: 'ok',

@@ -1,3 +1,4 @@
+import { OFFICIAL_CLIENT_ORIGINS } from './officialClientOrigins';
 import {
   booleanSetting,
   httpUrlSetting,
@@ -27,7 +28,7 @@ function trustedClientOrigins(environment: NodeJS.ProcessEnv): string[] {
     .split(',')
     .map((entry) => normalizedOrigin(entry))
     .filter((value): value is string => Boolean(value));
-  return Array.from(new Set(['https://web.circlus.org', ...configured]));
+  return Array.from(new Set([...OFFICIAL_CLIENT_ORIGINS, ...configured]));
 }
 
 function normalizeDomainSuffix(value: string): string {

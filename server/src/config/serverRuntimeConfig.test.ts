@@ -233,7 +233,7 @@ describe('server runtime config', () => {
         appOpenUrl: 'https://web.circlus.org/open',
         publicSiteProductUrl: 'https://circlus.org',
         blockedPublicSiteDomainSuffixes: ['space.circlus.org'],
-        trustedClientOrigins: ['https://web.circlus.org'],
+        trustedClientOrigins: ['https://web.circlus.org', 'org.circlus.client://app'],
         tenantValidation: { dnsCheck: true, tlsCheck: true, tlsTimeoutMs: 5_000 }
       },
       logging: {
@@ -518,7 +518,7 @@ describe('server runtime config', () => {
       appOpenUrl: 'https://web.circlus.org/open',
       publicSiteProductUrl: 'https://circlus.org',
       blockedPublicSiteDomainSuffixes: ['space.example.com'],
-      trustedClientOrigins: ['https://web.circlus.org', 'https://app.example.com'],
+      trustedClientOrigins: ['https://web.circlus.org', 'org.circlus.client://app', 'https://app.example.com'],
       tenantValidation: { dnsCheck: false, tlsCheck: true, tlsTimeoutMs: 8_000 }
     });
     expect(() => loadPublicAccessRuntimeConfig(environment({

@@ -22,12 +22,13 @@ native incoming-call actions and bootstrap tokens. Existing values, secrets,
 and ICE configuration are preserved. Keep `deploy/.env` and the secret files
 when updating this installation.
 
-The initializer sets `turn-local.secret` to mode `640`, preserves its owner and
-group, and writes the numeric group to `TURN_SECRET_GID` in `deploy/.env`.
-Compose gives coturn this supplementary group while retaining the image's
-non-root user. Other secrets remain private to their owner. Run initialization
-with the account that owns the deployment files (root if originally installed
-as root). Re-running it repairs permissions without replacing credentials.
+The initializer sets `turn-local.secret` and the four server secret files to
+mode `640`, preserves their owners and groups, and records the numeric groups
+in `deploy/.env`. The four server secrets must share one host group. Compose
+grants the matching supplementary groups to the non-root coturn and server
+processes. Run initialization with the account that owns the deployment files
+(root if originally installed as root). Re-running it repairs permissions
+without replacing credentials.
 `TURN_LOCAL_SECRET_FILE`, if set, selects the coturn secret whose permissions
 are repaired; relative paths are resolved from the repository root. A custom
 secret must also match the cluster secret configured for the ICE service.
@@ -38,7 +39,7 @@ Check for existing listeners before starting Compose:
 
 ```bash
 sudo ss -lntup | grep -E ':(80|443|3000|3090|3478)([^0-9]|$)' || true
-docker ps --format 'table {{.Names}}\t{{.Ports}}'
+sudo docker ps --format 'table {{.Names}}\t{{.Ports}}'
 ```
 
 The API and ICE Config Service bind only to host loopback, using `PORT=3000`
@@ -85,19 +86,22 @@ If UFW is inactive, check the firewall actually used by your host. Preserve
 existing SSH/HTTPS access. Provider firewall rules must be configured separately.
 Coturn uses `network_mode: host`, so there is no Docker port-publication rule
 that opens these ports for you. The Nginx HTTPS setup does not open TURN ports.
+For Oracle Cloud Ubuntu, see the [OCI installation guide](ORACLE_CLOUD.md)
+for Security List or Network Security Group rules and host `iptables` rules.
 
 ## TURN verification and troubleshooting
 
 Verify in this order:
 
 ```bash
-docker compose --env-file deploy/.env --profile local-turn ps -a
-docker compose --env-file deploy/.env --profile local-turn logs --tail=100 coturn ice-config-service
+sudo ./deploy/compose.sh ps -a
+sudo ./deploy/compose.sh logs --tail=100 coturn ice-config-service
 sudo ss -lntup | grep ':3478'
 ```
 
-Replace `3478` if configured differently. Coturn should listen on a public
-interface over both TCP and UDP. `TURN_PUBLIC_HOST` and the URLs in
+Replace `3478` if configured differently. Coturn should listen on a host
+interface over both TCP and UDP; behind NAT this may be a private address.
+`TURN_PUBLIC_HOST` and the URLs in
 `deploy/ice/turn-clusters.json` must resolve to the correct server. Behind 1:1
 NAT, configure `TURN_EXTERNAL_IP`. Initialization preserves existing ICE JSON:
 changing the hostname or port in `.env` alone does not update those URLs.
@@ -105,7 +109,7 @@ changing the hostname or port in `.env` alone does not update those URLs.
 Check secret loading without displaying it:
 
 ```bash
-docker compose --env-file deploy/.env --profile local-turn exec -T coturn sh -c '
+sudo ./deploy/compose.sh exec -T coturn sh -c '
   test -r /run/secrets/turn_local &&
   grep -q "^static-auth-secret=." /tmp/turnserver.conf &&
   echo "TURN secret: OK"
@@ -117,11 +121,15 @@ Container health checks local STUN liveness and secret/config availability.
 authenticated TURN relaying or public reachability.
 
 Once the containers are running, run this command from the repository root
-(requires Node.js 24+ on the VPS):
+if Node.js 24+ is installed system-wide:
 
 ```bash
-node deploy/smoke-test-turn.mjs
+sudo node deploy/smoke-test-turn.mjs
 ```
+
+The test runs `docker compose` internally, so it needs Docker socket access.
+If your account can already run Docker without `sudo`, use `node` instead.
+Node.js is not required for normal prebuilt-image installation.
 
 This reads `deploy/.env`, requests temporary credentials from the ICE API and
 uses `turnutils_uclient` inside coturn to authenticate and exchange packets for
@@ -152,10 +160,26 @@ file on both machines afterwards. Never copy `deploy/secrets/` for this test.
 This test exercises two relay allocations on the same TURN server; it does not
 exhaustively test reachability of relay ports from every possible peer/network.
 
-To check a call through the relay, enable **Always TURN** in the web client. This forces
-call media through the TURN relay instead of a direct connection. Make a new
-call between devices on different networks, check for `relay` candidates and
-audio in both directions, then restore your preferred setting.
+### Verify a call through TURN
+
+A successful call can use a direct connection. To confirm that the local TURN
+relay works from outside the VPS:
+
+1. On a computer, in the web client, open **Settings → About → Technical
+   information → Connection diagnostics** and turn on **Always TURN** and
+   **WebRTC debug**.
+2. Start a new call with someone on a different network, for example a phone on
+   mobile data. The phone does not need these settings.
+3. On the computer, check the **WebRTC Debug** panel: the selected local
+   candidate should be `relay`, `pc` should be `connected`, and `ice` should
+   be `connected` or `completed`. Check audio and video in both directions.
+4. Turn both settings off again afterwards.
+
+The panel is hidden in the compact mobile browser layout and is not part of
+the Android app's native call screen. Use the computer's panel for this check;
+the phone can be the other participant.
+
+### If relay still fails
 
 | Symptom | Next check |
 | --- | --- |
@@ -176,7 +200,7 @@ After obtaining the updated code, run from the installation directory:
 
 ```bash
 ./deploy/init-local-turn.sh
-docker compose --env-file deploy/.env --profile local-turn up -d --force-recreate coturn
+sudo ./deploy/compose.sh up -d --force-recreate coturn
 ```
 
 Use the original installation account and Compose project name. The initializer
@@ -195,8 +219,12 @@ calls using this coturn instance can be interrupted during recreation.
 With Linux, Docker Compose, Python 3, Node.js 24+ and OpenSSL installed:
 
 ```bash
+python3 deploy/test-compose-wrapper.py
 python3 deploy/test-local-turn.py
 ```
+
+`test-compose-wrapper.py` uses a stub `docker` command and checks which Compose
+files `deploy/compose.sh` selects and its release tag check.
 
 The test uses a temporary installation and separate Compose project. It covers
 initialization/reinitialization, ordinary-user and root-created secrets,
@@ -270,63 +298,144 @@ deployment.
 
 ## Updating
 
-Before pulling new code, complete a [backup](#backups). Then run from
-the repository root:
+Before updating, complete a [backup](#backups). For installations using
+published images, follow [the main README](../README.md#updating). For
+installations built from source (empty `CIRCLUS_IMAGE_TAG`), run from the
+repository root. If the installation checked out a release, fetch and switch
+to the new release tag; `git pull` works only when installed from a branch:
 
 ```bash
-git pull --ff-only
+git fetch --tags
+git switch --detach NEW_TAG
 ./deploy/init-local-turn.sh
-docker compose --env-file deploy/.env --profile local-turn up -d --build
+sudo ./deploy/compose.sh up -d --build
 ```
 
-Use the same Compose project name as the original installation. The initializer
-preserves existing values and creates any newly required secret files. The
-`migrate` service applies pending migrations before the API starts.
+Compose fixes the project name as `circlus-server`, so it retains the named
+volumes across tag changes. The initializer preserves existing values and
+creates any newly required secret files. The `migrate` service applies pending
+migrations before the API starts.
 
 ## Backups
 
-At minimum, back up:
+Use the helper below for the **standard Compose installation** in this
+repository. It saves PostgreSQL, the `server_data` volume, `deploy/.env`, the
+ICE configuration, and all five files in `deploy/secrets/` together. It checks
+the actual Compose project, mounts, secrets, and storage settings before it
+stops a service or changes data. If an installation uses another project name,
+custom storage directories, bind mounts, or moved secret/config files, it
+stops with an error; arrange backups for that layout separately. The helper
+does not save Nginx configuration, TLS certificates, external TURN services, or
+anything outside this Compose installation.
 
-- PostgreSQL data;
-- `deploy/.env`, `deploy/ice/turn-clusters.json`, and `deploy/secrets/`,
-  including `push-config-encryption.secret` needed to decrypt managed push
-  credentials and `circle-migration.secret` needed to finish a Circle move
-  that is in progress;
-- the Docker `server_data` volume, which contains encrypted attachments, public
-  site assets, generated sites, and local Circle migration packages;
-- reverse proxy configuration;
-- any custom filesystem storage directories configured outside `server_data`.
+### Create and verify a backup
 
-### Database backup before an update
-
-For a small Docker Compose deployment, a logical PostgreSQL backup is usually
-the easiest portable format. Run this from the repository root:
+From the repository root, run:
 
 ```bash
-mkdir -p backups
-BACKUP_FILE="backups/circlus-db-$(date +%Y%m%d-%H%M%S).dump"
-docker compose --env-file deploy/.env exec -T postgres \
-  pg_dump -U fm_user -d family_messenger -Fc > "$BACKUP_FILE"
-docker compose --env-file deploy/.env exec -T postgres \
-  pg_restore --list < "$BACKUP_FILE" > /dev/null && \
-  echo "Database backup saved to $BACKUP_FILE"
+sudo python3 deploy/backup.py create
 ```
 
-This creates a compressed PostgreSQL custom-format dump. The output redirection
-is handled by the VPS shell, so the dump is written to the host's `backups/`
-directory, not inside the PostgreSQL container. Removing or recreating that
-container therefore does not remove the dump. The `-T` option disables the
-Compose pseudo-terminal and keeps the binary dump stream intact. Do not
-continue with an update unless the final success message appears. Store another
-copy outside the VPS and do not place backups in Git.
+The command stops the API for the duration of the database and file
+backup, then starts it again. Calls and API requests may be interrupted. PostgreSQL stays running. It prints a directory
+such as `backups/circlus-20261007-120000`. The backup contains secrets and is
+readable only by root. Check the exact directory printed by the command:
 
-The database dump does not contain attachment payload files. Back up the
-`server_data` volume separately, or use your VPS/provider volume snapshot
-facility. Database and filesystem backups should be taken as one maintenance
-operation so their metadata remains consistent.
+```bash
+sudo python3 deploy/backup.py verify backups/circlus-20261007-120000
+```
 
-Do not publish backups. They may contain encrypted user data, metadata,
-invites, device records, and server-admin records.
+Replace the example name with your backup directory. Keep the **whole**
+directory together and copy it to storage outside the VPS. The check verifies
+file hashes and archive structure. It is not a substitute for a trial restore
+on another installation. Do not publish backups or add them to Git.
+
+### Restore to an empty installation
+
+Install Docker and check out the **code commit printed by `verify`**. Put the
+selected backup directory on this VPS. The target Compose data volumes must
+not exist. The helper pulls the PostgreSQL image if it is missing, after its
+read-only checks pass. The restore command checks the backup, code commit,
+Compose paths, and absence of target volumes
+**before** it copies settings or creates volumes:
+
+```bash
+sudo python3 deploy/backup.py verify /path/to/selected-backup
+git switch --detach SOURCE_COMMIT
+sudo python3 deploy/backup.py restore /path/to/selected-backup
+sudo ./deploy/compose.sh up -d
+sudo ./deploy/compose.sh ps -a
+```
+
+Replace `/path/to/selected-backup` in both commands with the same absolute
+path, and `SOURCE_COMMIT` with the commit printed by `verify`. The restore copies the backed-up settings and secrets, fills new volumes,
+and restores PostgreSQL. It leaves the API stopped until the `up -d` command.
+If restoration fails after it begins, it attempts to remove only the partial
+new target volumes; the selected backup remains unchanged. Read any cleanup
+error before retrying. Restore an older backup with the code version recorded
+in that backup; switching to a newer release can run database migrations.
+
+### Replace data on an existing VPS
+
+First create a **new rescue backup of the current state** with
+`create --leave-stopped` and copy it off the VPS. The API stays stopped so no
+new writes can occur before the old data is cleared. This is distinct from
+the **source backup** you intend to restore. Write down the two full paths; the script never picks a backup by date.
+Verify both, then switch the checkout to the source backup's recorded code
+commit. The `clear` command checks both backups and the existing Docker volumes,
+asks you to type `DELETE circlus-server`, and only then removes the current
+Compose containers and data volumes. It does not remove either backup directory.
+
+```bash
+sudo python3 deploy/backup.py create --leave-stopped
+sudo python3 deploy/backup.py verify /path/to/source-backup
+sudo python3 deploy/backup.py verify /path/to/rescue-backup
+git switch --detach SOURCE_COMMIT
+sudo python3 deploy/backup.py clear /path/to/source-backup /path/to/rescue-backup
+sudo python3 deploy/backup.py restore /path/to/source-backup
+sudo ./deploy/compose.sh up -d
+sudo ./deploy/compose.sh ps -a
+```
+
+Replace `SOURCE_COMMIT` with the source backup's printed commit. The source
+and rescue backups must have the same `VPS_ID` as the installation.
+If the server is already stopped, `clear` can still check and remove its
+standard volumes. To create a rescue backup, PostgreSQL must be running and
+its container must exist. If `clear` or `restore` fails, keep the server
+stopped and read the error before retrying; the backup directories are never
+removed by these commands. Use the rescue path as the source if you decide to
+return to the state just before clearing. If you cancel the replacement after
+creating the rescue backup, restart the API with:
+
+```bash
+sudo ./deploy/compose.sh start server
+```
+
+### Older releases and other installation layouts
+
+Prebuilt images do not change what needs to be backed up. The helper works
+with source-built and prebuilt images when the **checked-out code contains this
+helper** and the running installation passes its layout checks. An older
+checkout may have the same data volumes but lack the helper or use different
+Compose settings. Do not copy `backup.py` from a newer release into it and
+assume that it supports that release.
+
+For a different layout, first inspect the Compose configuration and the
+running containers' mounts using the **same Compose files, environment file,
+project name, and profiles used to start the server**. Identify the actual
+PostgreSQL data volume, every server file-storage volume or bind mount, and
+the active environment, ICE configuration, and secret files. Stop services
+that can write to the database or file storage while making a consistent
+backup. Save a PostgreSQL custom-format dump, archive every file-storage
+location with ownership and permissions preserved, and copy the active
+configuration and secrets. Save reverse-proxy settings and TLS material
+separately if needed. Verify the dump and archives, keep a copy outside the
+VPS, and test restoration on a separate installation.
+
+The `clear` and `restore` commands above apply only to the checked standard
+layout. For another layout, prepare a restore procedure from its inspected
+mounts and paths before removing any existing data; there is no safe universal
+volume name or directory to substitute into those commands.
 
 ## Emergency deletion after complete identity loss
 
@@ -336,7 +445,7 @@ List all Circles and their current domains, identifiers, status, member and
 guest counts, total identities, and active device counts:
 
 ```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
+sudo ./deploy/compose.sh exec server \
   npm run tenant:list:prod
 ```
 
@@ -345,7 +454,7 @@ machine-readable output is preferable. The next command only inspects the
 selected target:
 
 ```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
+sudo ./deploy/compose.sh exec server \
   npm run tenant:delete:prod -- --host=circle.example.com
 ```
 
@@ -354,7 +463,7 @@ repeat the command with explicit confirmation. If multiple Circles share the hos
 `--family-id=THE_SELECTED_FAMILY_ID` and refuses to choose one automatically:
 
 ```bash
-docker compose --env-file deploy/.env --profile local-turn exec server \
+sudo ./deploy/compose.sh exec server \
   npm run tenant:delete:prod -- --host=circle.example.com \
   --family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND \
   --confirm-family-id=THE_FAMILY_ID_FROM_THE_FIRST_COMMAND

@@ -158,6 +158,20 @@ router.get('/server', requireInspectorSession, async (req: InspectorRequest, res
         values: [familyId]
       }),
       tableBlock({
+        table: 'devices',
+        title: 'App versions in use',
+        description: 'Client builds last reported by active devices. Check it before support for an older signed protocol version ends (CLIENT_SERVER_COMPATIBILITY.md). Devices that have not reported a build since the update appear as unknown.',
+        sql: `SELECT COALESCE(client_version, 'unknown') AS client_version,
+                     COUNT(*)::int AS devices,
+                     MAX(last_seen_at) AS last_seen_at
+              FROM devices
+              WHERE family_id = $1 AND status = 'active'
+              GROUP BY COALESCE(client_version, 'unknown')
+              ORDER BY last_seen_at DESC NULLS LAST
+              LIMIT 100`,
+        values: [familyId]
+      }),
+      tableBlock({
         table: 'family_domains',
         title: 'Domain mappings',
         description: 'Hosts that route requests into this circle. Useful when debugging wrong-domain, reverse-proxy, or stale-domain issues.',

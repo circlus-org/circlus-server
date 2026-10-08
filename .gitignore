@@ -10,6 +10,7 @@ node_modules/
 dist/
 coverage/
 server-data/
+backups/
 *.dump
 *.backup
 deploy/.env

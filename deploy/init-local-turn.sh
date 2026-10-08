@@ -3,7 +3,37 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
-env_file="${1:-$script_dir/.env}"
+env_file="$script_dir/.env"
+env_file_selected=false
+set_image_tag=false
+requested_tag=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --image-tag)
+      if [ "$set_image_tag" = true ] || [ "$#" -lt 2 ]; then
+        echo "usage: $0 [ENV_FILE] [--image-tag TAG]" >&2
+        exit 1
+      fi
+      requested_tag="$2"
+      set_image_tag=true
+      shift 2
+      ;;
+    --*)
+      echo "unknown option: $1" >&2
+      echo "usage: $0 [ENV_FILE] [--image-tag TAG]" >&2
+      exit 1
+      ;;
+    *)
+      if [ "$env_file_selected" = true ]; then
+        echo "usage: $0 [ENV_FILE] [--image-tag TAG]" >&2
+        exit 1
+      fi
+      env_file="$1"
+      env_file_selected=true
+      shift
+      ;;
+  esac
+done
 
 if [ ! -f "$env_file" ]; then
   echo "deployment environment file not found: $env_file" >&2
@@ -13,6 +43,28 @@ fi
 if ! command -v openssl >/dev/null 2>&1; then
   echo "openssl is required to generate deployment secrets" >&2
   exit 1
+fi
+if [ "$set_image_tag" = true ]; then
+  case "$requested_tag" in
+    v*) ;;
+    *) echo "--image-tag requires a nonempty release tag beginning with v" >&2; exit 1 ;;
+  esac
+  case "$requested_tag" in
+    *[!A-Za-z0-9_.-]*) echo "--image-tag contains unsupported characters" >&2; exit 1 ;;
+  esac
+  if ! command -v git >/dev/null 2>&1; then
+    echo "git is required to verify --image-tag" >&2
+    exit 1
+  fi
+  tag_commit=$(git -c "safe.directory=$repo_dir" -C "$repo_dir" rev-parse -q --verify "refs/tags/$requested_tag^{commit}") || {
+    echo "--image-tag does not name a tag in this checkout: $requested_tag" >&2
+    exit 1
+  }
+  head_commit=$(git -c "safe.directory=$repo_dir" -C "$repo_dir" rev-parse HEAD) || exit 1
+  if [ "$tag_commit" != "$head_commit" ]; then
+    echo "--image-tag=$requested_tag does not point to the checked-out commit" >&2
+    exit 1
+  fi
 fi
 
 set -a
@@ -109,8 +161,34 @@ generate_secret_if_missing "$secrets_dir/turn-local.secret"
 generate_secret_if_missing "$secrets_dir/push-config-encryption.secret"
 generate_secret_if_missing "$secrets_dir/circle-migration.secret"
 
-# Compose file-backed secrets keep host ownership and mode. Grant coturn the
-# file's group instead of running it as root or exposing the secret to everyone.
+# Compose file-backed secrets keep host ownership and mode. Grant each
+# non-root service the file's group instead of exposing secrets to everyone.
+server_secret_gid=""
+prepare_server_secret() {
+  secret_file="$1"
+  case "$secret_file" in
+    /*) ;;
+    *) secret_file="$repo_dir/$secret_file" ;;
+  esac
+  if [ ! -f "$secret_file" ] || [ ! -s "$secret_file" ] || [ ! -r "$secret_file" ]; then
+    echo "Server secret must be a readable, nonempty file: $secret_file" >&2
+    exit 1
+  fi
+  secret_gid=$(stat -c '%g' "$secret_file")
+  if [ -n "$server_secret_gid" ] && [ "$secret_gid" != "$server_secret_gid" ]; then
+    echo "Server secrets must share one host group: $secret_file has group $secret_gid, expected $server_secret_gid" >&2
+    exit 1
+  fi
+  server_secret_gid="$secret_gid"
+  chmod 640 "$secret_file"
+}
+
+prepare_server_secret "${ICE_S2S_SECRET_FILE:-$secrets_dir/ice-s2s.secret}"
+prepare_server_secret "${ICE_SUBJECT_ID_SECRET_FILE:-$secrets_dir/ice-subject-id.secret}"
+prepare_server_secret "${PUSH_CONFIG_ENCRYPTION_SECRET_FILE:-$secrets_dir/push-config-encryption.secret}"
+prepare_server_secret "${CIRCLE_MIGRATION_SECRET_FILE:-$secrets_dir/circle-migration.secret}"
+persist_env_value SERVER_SECRET_GID "$server_secret_gid"
+
 turn_secret_file="${TURN_LOCAL_SECRET_FILE:-$secrets_dir/turn-local.secret}"
 case "$turn_secret_file" in
   /*) ;;
@@ -135,6 +213,11 @@ else
     "$template_file" > "$config_file"
   chmod 600 "$config_file"
   echo "created ICE configuration: $config_file"
+fi
+
+if [ "$set_image_tag" = true ]; then
+  persist_env_value CIRCLUS_IMAGE_TAG "$requested_tag"
+  echo "CIRCLUS_IMAGE_TAG=$requested_tag saved in $env_file"
 fi
 
 echo "local ICE/TURN secrets are ready in: $secrets_dir"

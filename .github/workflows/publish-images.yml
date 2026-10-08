@@ -1,6 +1,5 @@
 # Exported to .github/workflows/publish-images.yml in the server repository.
 # Each repository publishes tagged images to its own GHCR package.
-# Private packages support the rehearsal; public packages support releases.
 name: Publish server images
 
 on:
@@ -45,3 +44,44 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}-ice-config-service:${{ github.ref_name }}
+
+  # Users install versions listed on the Releases page, so a release must not
+  # appear before its images. This creates only a draft: the publisher checks
+  # anonymous image pulls, completes the notes, and publishes it.
+  release-draft:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      SERVER_IMAGE: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+      ICE_IMAGE: ghcr.io/${{ github.repository }}-ice-config-service:${{ github.ref_name }}
+    steps:
+      - name: Create draft release
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it unchanged."
+            exit 0
+          fi
+          cat > notes.md <<NOTES
+          ## Changes
+
+          - TODO: user-visible changes and security fixes.
+
+          ## Before updating
+
+          - Database migrations: TODO (none, or which ones). Back up PostgreSQL
+            and the \`server_data\` volume first in either case.
+          - Manual steps: TODO (none, or what to run or change).
+
+          ## Images
+
+          - \`$SERVER_IMAGE\`
+          - \`$ICE_IMAGE\`
+
+          Install or update by following the README with \`CIRCLUS_IMAGE_TAG=$TAG\`.
+          NOTES
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$TAG" --notes-file notes.md

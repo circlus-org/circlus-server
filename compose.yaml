@@ -64,6 +64,9 @@ services:
       dockerfile: server/Dockerfile
     init: true
     restart: unless-stopped
+    # File-backed Compose secrets retain their host ownership and mode.
+    group_add:
+      - "${SERVER_SECRET_GID:-65534}"
     env_file:
       - ${CIRCLUS_ENV_FILE:-./deploy/.env}
     environment:

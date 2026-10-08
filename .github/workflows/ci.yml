@@ -96,6 +96,9 @@ jobs:
       - name: Build ICE Config Service container
         run: docker build --tag circlus-ice-config-service-ci ice_config_service
 
+      - name: Test deployment Compose wrapper
+        run: python3 deploy/test-compose-wrapper.py
+
       - name: Test local TURN installation, permissions and authenticated relay traffic
         run: python3 deploy/test-local-turn.py
 

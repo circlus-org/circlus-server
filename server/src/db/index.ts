@@ -18,6 +18,20 @@ function contextualClient(): PoolClient | undefined {
   return context?.active ? context.client : undefined;
 }
 
+// Side effects (realtime hints) queued by afterCommit() for the outermost transaction of a client.
+const commitCallbacks = new WeakMap<PoolClient, Array<() => void>>();
+
+/**
+ * Run a side effect once the current context transaction commits; it is dropped on rollback.
+ * Outside a transaction context it runs immediately.
+ */
+export function afterCommit(callback: () => void): void {
+  const client = contextualClient();
+  const queued = client ? commitCallbacks.get(client) : undefined;
+  if (queued) queued.push(callback);
+  else callback();
+}
+
 let internalPool: Pool | null = null;
 let serverProcessLockClient: PoolClient | null = null;
 
@@ -141,16 +155,27 @@ export async function transaction<T>(
   const inherited = contextualClient();
   if (inherited) return callback(inherited);
   const client = await getClient();
+  const callbacks: Array<() => void> = [];
+  commitCallbacks.set(client, callbacks);
 
   try {
     await client.query('BEGIN');
     const result = await callback(client);
     await client.query('COMMIT');
+    commitCallbacks.delete(client);
+    for (const committed of callbacks) {
+      try {
+        committed();
+      } catch (error) {
+        logger.warn('after_commit_callback_failed', { error });
+      }
+    }
     return result;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
+    commitCallbacks.delete(client);
     client.release();
   }
 }

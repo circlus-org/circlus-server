@@ -33,16 +33,25 @@ The compatibility-relevant part of the response has this shape:
   "result": {
     "circleId": "circle-1",
     "vpsId": "vps-1",
-    "capabilitiesVersion": 1,
+    "capabilitiesVersion": 2,
     "protocols": {
-      "signedRequestEnvelope": 2,
-      "circleMembership": 1,
-      "linkCapability": 1,
-      "circleMigration": 1,
+      "signedRequestEnvelope": 3,
+      "circleMembership": 2,
+      "circleInviteMembershipCheckpoint": 2,
+      "linkCapability": 2,
+      "circleMigration": 2,
       "deviceEnrollment": 2
     },
-    "apiLevel": 3,
-    "serverVersion": "1.0.0",
+    "protocolRanges": {
+      "signedRequestEnvelope": { "min": 3, "max": 3 },
+      "circleMembership": { "min": 2, "max": 2 },
+      "circleInviteMembershipCheckpoint": { "min": 2, "max": 2 },
+      "linkCapability": { "min": 2, "max": 2 },
+      "circleMigration": { "min": 2, "max": 2 },
+      "deviceEnrollment": { "min": 2, "max": 2 }
+    },
+    "apiLevel": 4,
+    "serverVersion": "1.0.2",
     "enabled": {},
     "limits": {
       "messageTtlHours": 720,
@@ -57,8 +66,13 @@ The compatibility-relevant part of the response has this shape:
 ```
 
 Clients must reject an unsupported `capabilitiesVersion` or any unsupported
-signed protocol version. They may ignore unknown response fields and unknown
-keys in `enabled`. Servers must not remove published fields or change their
+signed protocol version. `protocols` lists the current version of each signed
+protocol; `protocolRanges` lists the versions the server accepts
+(`min`..`max`, with an optional `minRaisesAt` date announcing when `min` becomes
+`max`). A client that understands ranges requires a common version for every
+protocol it knows and uses the highest one; servers without `protocolRanges`
+are matched by exact versions. Clients may ignore unknown response fields
+and unknown keys in `enabled`. Servers must not remove published fields or change their
 meaning in an incompatible way without incrementing the relevant version.
 
 Signed-request envelope version 2 binds `circleId` into the canonical signed
@@ -82,7 +96,11 @@ Rules:
 Levels so far: 1 — the first public server; 2 — `memberRemoval`,
 `platformRecoveryV1`; 3 — `membershipSnapshots` (the server validates and
 stores owner-signed `snapshot` states in the Circle membership chain and
-accepts `since` on membership loads). Clients issue snapshots only on level 3.
+accepts `since` on membership loads). Clients issue snapshots only on level 3;
+4 — `clientVersionReport` (the server accepts the `X-Circlus-Client-Version`
+header in CORS and records the reported build per device). Clients send the
+header only to level 4 servers: an older server would reject the browser's
+preflight request.
 
 Increase the level when a newer client must distinguish a server that provides
 a capability from a server that does not. Internal refactoring, database
