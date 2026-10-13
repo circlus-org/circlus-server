@@ -1,4 +1,4 @@
-import { isMessageAllowedForConnection, type LocalConnectionInfo } from './wsConnectionContext';
+import { isIncomingCallRecipient, isMessageAllowedForConnection, type LocalConnectionInfo } from './wsConnectionContext';
 
 const nativeRuntime: LocalConnectionInfo = {
   actorType: 'local',
@@ -61,4 +61,26 @@ it('keeps an external call identity restricted even after that identity becomes 
   for (const type of ['message:send', 'message:sync', 'system:sync', 'register', 'register-call-runtime', 'file-transfer:offer']) {
     expect(isMessageAllowedForConnection(external, type)).toBe(false);
   }
+});
+
+
+describe('authenticated no-call app sessions', () => {
+  it('blocks call signaling while preserving message and direct-file traffic', () => {
+    const info = { ...nativeRuntime, runtimeMode: 'default' as const, callsEnabled: false };
+    for (const type of ['call:offer', 'call:answer', 'call:ice-candidate', 'register-call-runtime']) {
+      expect(isMessageAllowedForConnection(info, type)).toBe(false);
+    }
+    for (const type of ['message:send', 'system:sync', 'file-transfer:offer', 'ping']) {
+      expect(isMessageAllowedForConnection(info, type)).toBe(true);
+    }
+  });
+  it('keeps call permission specific to the exact connection and Circle', () => {
+    const noCalls = { ...nativeRuntime, runtimeMode: 'default' as const, callsEnabled: false };
+    const sameIdentityOtherDevice = { ...noCalls, deviceId: 'device-2', callsEnabled: true };
+    const otherCircle = { ...sameIdentityOtherDevice, familyId: 'family-2' };
+    expect(isIncomingCallRecipient(noCalls)).toBe(false);
+    expect(isIncomingCallRecipient(sameIdentityOtherDevice)).toBe(true);
+    expect(isIncomingCallRecipient(otherCircle)).toBe(true);
+    expect(isIncomingCallRecipient(undefined)).toBe(false);
+  });
 });

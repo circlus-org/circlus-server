@@ -1295,7 +1295,8 @@ export type ServerFeatureKey =
   | 'memberRemoval'
   | 'platformRecoveryV1'
   | 'membershipSnapshots'
-  | 'clientVersionReport';
+  | 'clientVersionReport'
+  | 'clientProtocolsReport';
 
 export interface ServerCapabilitiesResponse {
   circleId: CircleId;

@@ -16,6 +16,7 @@ import { configService } from '../services/configService';
 import { iceServersService } from '../services/iceServersService';
 import { circleMediaRoutingService } from '../services/circleMediaRoutingService';
 import { getRequestHost, type TenancyRequest } from '../middleware/tenancy';
+import { isTrustedClientOrigin } from '../utils/trustedOrigins';
 import {
   createNonceStore,
   getSignedPayload,
@@ -73,7 +74,8 @@ const rlCapabilities = createRateLimiter({
 
 const SERVER_VERSION = String((serverPackage as { version?: string }).version || '0.0.0');
 // 4: accepts the X-Circlus-Client-Version header (CLIENT_SERVER_COMPATIBILITY.md).
-const SERVER_API_LEVEL = 4;
+// 5: accepts the X-Circlus-Client-Protocols header.
+const SERVER_API_LEVEL = 5;
 
 /** Lightweight tenant/lifecycle probe used by foreground supervisors. */
 router.get('/lifecycle', rlCapabilities, async (req: TenancyRequest, res) => {
@@ -86,8 +88,10 @@ router.get('/lifecycle', rlCapabilities, async (req: TenancyRequest, res) => {
   const config = await configService.requireFamilyConfig(req.familyId);
   return res.json({
     status: 'ok',
-    result: { circleId: config.circle_id }
-  } as ApiResponse<{ circleId: string }>);
+    result: { circleId: config.circle_id,
+      ...(req.get('Origin') ? { clientOriginTrust: { version: 1, pageOrigin: req.get('Origin')!,
+        trusted: isTrustedClientOrigin(req.get('Origin'), config) } } : {}) }
+  } as ApiResponse<{ circleId: string; clientOriginTrust?: { version: number; pageOrigin: string; trusted: boolean } }>);
 });
 
 /**

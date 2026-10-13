@@ -101,3 +101,49 @@ export function signedProtocolUpdateDeadline(
   }
   return earliest?.value ?? null;
 }
+
+/** Header with the newest version of each signed protocol the client build supports. */
+export const CLIENT_PROTOCOLS_HEADER = 'X-Circlus-Client-Protocols';
+
+/** e.g. "signedRequestEnvelope=3,circleMembership=2,…" from this build's ranges. */
+export function formatClientProtocolsReport(localRanges: SignedProtocolRanges = SIGNED_PROTOCOL_RANGES): string {
+  return (Object.keys(localRanges) as SignedProtocolName[])
+    .map((name) => `${name}=${localRanges[name].max}`)
+    .join(',');
+}
+
+/**
+ * Known protocols with their reported newest version, or null for a malformed report.
+ * Names this build does not know are skipped: a newer client may report more protocols.
+ */
+export function parseClientProtocolsReport(raw: string | null | undefined): Partial<SignedProtocolVersions> | null {
+  const value = String(raw || '').trim();
+  if (!value || value.length > 512) return null;
+  const known = new Set(Object.keys(SIGNED_PROTOCOL_VERSIONS));
+  const report: Partial<Record<SignedProtocolName, number>> = {};
+  for (const entry of value.split(',')) {
+    const match = /^([A-Za-z]{1,64})=([1-9][0-9]{0,3})$/.exec(entry.trim());
+    if (!match) return null;
+    if (known.has(match[1])) report[match[1] as SignedProtocolName] = Number(match[2]);
+  }
+  return Object.keys(report).length > 0 ? report : null;
+}
+
+/**
+ * Protocols for which a client with this report is not ready for the newest version this
+ * server accepts, with the date the server stops accepting older ones (null when no date
+ * is announced). Missing protocols count as not ready.
+ */
+export function outdatedClientProtocols(
+  report: Partial<SignedProtocolVersions> | null,
+  serverRanges: SignedProtocolRanges = SIGNED_PROTOCOL_RANGES
+): Array<{ name: SignedProtocolName; reported: number | null; required: number; minRaisesAt: string | null }> {
+  return (Object.keys(serverRanges) as SignedProtocolName[])
+    .filter((name) => (report?.[name] ?? 0) < serverRanges[name].max)
+    .map((name) => ({
+      name,
+      reported: report?.[name] ?? null,
+      required: serverRanges[name].max,
+      minRaisesAt: serverRanges[name].minRaisesAt ?? null,
+    }));
+}

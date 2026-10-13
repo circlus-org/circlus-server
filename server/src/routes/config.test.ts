@@ -12,6 +12,7 @@ jest.mock('../db/repositories', () => ({
 
 jest.mock('../services/configService', () => ({
   configService: {
+    requireFamilyConfig: jest.fn(),
     getResolvedFamilyConfig: jest.fn().mockResolvedValue({
       config: { public_base_url: 'https://family.example.com', circle_id: 'circle_test_1234567890' },
       serverName: 'Internal Circle',
@@ -43,6 +44,7 @@ jest.mock('../services/callAdmissionService', () => ({
   verifyCallLinkActionGrant: jest.fn(),
 }));
 
+import { configService } from '../services/configService';
 import { deviceRepository, familyDomainRepository, identityRepository, circleSiteSettingsRepository } from '../db/repositories';
 import { iceServersService } from '../services/iceServersService';
 import { circleMediaRoutingService } from '../services/circleMediaRoutingService';
@@ -86,7 +88,7 @@ describe('GET /capabilities: public circle site eligibility', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         result: expect.objectContaining({
-          apiLevel: 4,
+          apiLevel: 5,
           protocolRanges: SIGNED_PROTOCOL_RANGES,
           enabled: { platformRecoveryV1: false },
           canonical: expect.objectContaining({ publicSiteEligible: true, publicSiteEnabled: true }),
@@ -402,5 +404,24 @@ describe('POST /turn-credentials/call-link: capability-scoped TURN identity', ()
         username: 'link-user',
       }),
     }));
+  });
+});
+
+
+describe('GET /lifecycle: explicit origin trust statement', () => {
+  test('two Circles on one transport origin keep their own trust decisions', async () => {
+    for (const [circleId, trusted] of [['circle-a', true], ['circle-b', false]] as const) {
+      (configService.requireFamilyConfig as jest.Mock).mockResolvedValue({ circle_id: circleId,
+        extra_trusted_client_origins: trusted ? ['https://custom-client.invalid'] : [] });
+      const res = makeResponse();
+      await getHandler('/lifecycle')({ familyId: circleId, get: () => 'https://custom-client.invalid' }, res);
+      expect(configService.requireFamilyConfig).toHaveBeenLastCalledWith(circleId);
+      expect(res.json).toHaveBeenCalledWith({ status: 'ok', result: { circleId,
+        clientOriginTrust: { version: 1, pageOrigin: 'https://custom-client.invalid', trusted } } });
+    }
+  });
+  test('missing family stops without selecting a Circle', async () => {
+    const res = makeResponse(); await getHandler('/lifecycle')({ get: () => 'https://custom-client.invalid' }, res);
+    expect(res.status).toHaveBeenCalledWith(500);
   });
 });

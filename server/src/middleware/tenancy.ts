@@ -116,7 +116,7 @@ function applyUnavailableCircleCors(
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type,Authorization,X-Inspector-Request-Token,X-Request-ID,X-Circlus-Circle-ID,X-Circlus-Client-Version'
+    'Content-Type,Authorization,X-Inspector-Request-Token,X-Request-ID,X-Circlus-Circle-ID,X-Circlus-Client-Version,X-Circlus-Client-Protocols'
   );
   res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID,X-Circlus-Circle-Suspended');
   res.setHeader('Access-Control-Max-Age', '600');

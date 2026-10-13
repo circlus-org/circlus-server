@@ -4,6 +4,7 @@ import { deviceRepository, identityRepository, serverAdminRepository, temporaryD
 import { verifySignedRequest } from '../utils/crypto';
 import { normalizeTrustedOrigin } from '../utils/trustedOrigins';
 import { CLIENT_VERSION_HEADER, normalizeClientVersion } from '../utils/clientVersion';
+import { CLIENT_PROTOCOLS_HEADER, parseClientProtocolsReport } from '../../../shared/protocolVersions';
 import type { SignedRequest, ErrorCode, DeviceId } from '../../../shared/types';
 import { bumpChatEpochsForTemporaryDevice } from '../services/chatEpochRotation';
 import { getSecurityRuntimeConfig, getRateLimitRuntimeConfig } from '../config/serverRuntimeConfig';
@@ -292,7 +293,8 @@ export async function verifySignature<T = unknown>(
         familyId,
         device.device_id,
         normalizeTrustedOrigin(req.get('origin')),
-        normalizeClientVersion(req.get(CLIENT_VERSION_HEADER))
+        normalizeClientVersion(req.get(CLIENT_VERSION_HEADER)),
+        parseClientProtocolsReport(req.get(CLIENT_PROTOCOLS_HEADER))
       );
     } else if (temporaryDevice) {
       await temporaryDeviceRepository.updateLastSeen(familyId, temporaryDevice.device_id);

@@ -59,22 +59,48 @@ jobs:
       SERVER_IMAGE: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
       ICE_IMAGE: ghcr.io/${{ github.repository }}-ice-config-service:${{ github.ref_name }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Create draft release
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists; leaving it unchanged."
             exit 0
           fi
+          # Database changes are listed from the repository, not written by hand. They are
+          # counted from the last published release: candidate tags without a release do
+          # not reach servers, so their migrations are new for every owner.
+          PREVIOUS_TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            MIGRATIONS="$(git diff --name-only --diff-filter=A "$PREVIOUS_TAG" "$TAG" -- server/db/migrations \
+              | grep -E '\.sql$' | xargs -r -n1 basename | sed 's/^/- `/; s/$/`/')"
+            SINCE="since $PREVIOUS_TAG"
+          else
+            MIGRATIONS=""
+            SINCE=""
+          fi
+          if [ -n "$MIGRATIONS" ]; then
+            DATABASE="New migrations $SINCE run automatically during the update:
+
+          $MIGRATIONS
+
+          After them, the previous version may not start on this database. To go back, restore the backup made before updating."
+          elif [ -n "$PREVIOUS_TAG" ]; then
+            DATABASE="No database changes $SINCE."
+          else
+            DATABASE="First release: the database is created during installation."
+          fi
           cat > notes.md <<NOTES
           ## Changes
 
-          - TODO: user-visible changes and security fixes.
+          <!-- Publisher: what changed for server owners and their users; mark security fixes. Comments are not shown on the release page. -->
 
-          ## Before updating
+          <!-- Publisher: add "## Before updating" only if the update needs more than the README "Updating" steps: a new setting or secret, a configuration change, app versions that stop working with this server (CLIENT_SERVER_COMPATIBILITY.md). -->
 
-          - Database migrations: TODO (none, or which ones). Back up PostgreSQL
-            and the \`server_data\` volume first in either case.
-          - Manual steps: TODO (none, or what to run or change).
+          ## Database
+
+          $DATABASE
 
           ## Images
 

@@ -29,7 +29,7 @@ deliver messages, and run the service. Examples include:
 - attachment ownership, size, retention and storage identifiers, but not the
   original filename or MIME type of an ordinary encrypted attachment;
 - IP addresses, browser origins, the app build each device reports (platform
-  and version), activity times, push endpoints and delivery tokens, call
+  and version) with the newest signed protocol versions it supports, activity times, push endpoints and delivery tokens, call
   participants, and WebRTC signaling such as SDP and ICE candidates.
 
 Even without message plaintext, this metadata can reveal relationships and

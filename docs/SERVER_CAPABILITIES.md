@@ -50,8 +50,8 @@ The compatibility-relevant part of the response has this shape:
       "circleMigration": { "min": 2, "max": 2 },
       "deviceEnrollment": { "min": 2, "max": 2 }
     },
-    "apiLevel": 4,
-    "serverVersion": "1.0.2",
+    "apiLevel": 5,
+    "serverVersion": "1.0.3",
     "enabled": {},
     "limits": {
       "messageTtlHours": 720,
@@ -100,7 +100,11 @@ accepts `since` on membership loads). Clients issue snapshots only on level 3;
 4 — `clientVersionReport` (the server accepts the `X-Circlus-Client-Version`
 header in CORS and records the reported build per device). Clients send the
 header only to level 4 servers: an older server would reject the browser's
-preflight request.
+preflight request; 5 — `clientProtocolsReport` (the server accepts the
+`X-Circlus-Client-Protocols` header with the newest version of each signed
+protocol the app supports, records it per device and lists in Inspector the
+devices not ready for the newest accepted versions). Clients send it only to
+level 5 servers.
 
 Increase the level when a newer client must distinguish a server that provides
 a capability from a server that does not. Internal refactoring, database

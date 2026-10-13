@@ -115,14 +115,20 @@ export class DeviceRepository {
     familyId: string,
     deviceId: DeviceId,
     webOrigin?: string | null,
-    clientVersion?: string | null
+    clientVersion?: string | null,
+    clientProtocols?: Record<string, number> | null
   ): Promise<void> {
+    // Requests without a report (native background requests, older apps) keep the last one;
+    // client_version_reported_at shows how fresh it is next to last_seen_at.
     await pool.query(
       `WITH touched AS (
          UPDATE devices
             SET last_seen_at = NOW(),
                 web_origin = COALESCE($3, web_origin),
                 client_version = COALESCE($4, client_version),
+                client_protocols = COALESCE($5::jsonb, client_protocols),
+                client_version_reported_at = CASE WHEN $4::text IS NULL AND $5::jsonb IS NULL
+                  THEN client_version_reported_at ELSE NOW() END,
                 inactivity_warning_sent_at = NULL
           WHERE device_id = $1
             AND family_id = $2
@@ -135,7 +141,8 @@ export class DeviceRepository {
           AND event.recipient_identity_id = touched.identity_id
           AND event.type = 'device:inactivity-warning'
           AND event.payload->>'deviceId' = $1`,
-      [deviceId, familyId, webOrigin ?? null, clientVersion ?? null]
+      [deviceId, familyId, webOrigin ?? null, clientVersion ?? null,
+        clientProtocols ? JSON.stringify(clientProtocols) : null]
     );
   }
 

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import type { ErrorCode } from '@shared/types';
 import { circleInspectorRepository } from '../db/repositories/circleInspectorRepository';
 import { query } from '../db';
+import { loadClientProtocolReadiness } from '../services/clientProtocolReadiness';
 import { verifySignature, requireActiveIdentity, requireAdmin, getSignedPayload } from '../middleware/auth';
 import type { AuthRequest } from '../middleware/auth';
 import {
@@ -160,10 +161,11 @@ router.get('/server', requireInspectorSession, async (req: InspectorRequest, res
       tableBlock({
         table: 'devices',
         title: 'App versions in use',
-        description: 'Client builds last reported by active devices. Check it before support for an older signed protocol version ends (CLIENT_SERVER_COMPATIBILITY.md). Devices that have not reported a build since the update appear as unknown.',
+        description: 'Client builds last reported by active devices of this server. Devices that have not reported a build since the update appear as unknown. Background requests of the Android app do not report a build, so reported_at may be older than last_seen_at.',
         sql: `SELECT COALESCE(client_version, 'unknown') AS client_version,
                      COUNT(*)::int AS devices,
-                     MAX(last_seen_at) AS last_seen_at
+                     MAX(last_seen_at) AS last_seen_at,
+                     MAX(client_version_reported_at) AS reported_at
               FROM devices
               WHERE family_id = $1 AND status = 'active'
               GROUP BY COALESCE(client_version, 'unknown')
@@ -171,6 +173,12 @@ router.get('/server', requireInspectorSession, async (req: InspectorRequest, res
               LIMIT 100`,
         values: [familyId]
       }),
+      loadClientProtocolReadiness(familyId).then((rows) => ({
+        table: 'devices',
+        title: 'Devices not ready for the newest protocol versions',
+        description: 'Active devices whose app does not support the newest version of a signed protocol this server accepts. They stop working on support_ends, or when you install a server release that no longer accepts the older version (its release notes say so). Ask their users to update the app first. "not reported" means the device has not used a current app since the server update.',
+        rows
+      })),
       tableBlock({
         table: 'family_domains',
         title: 'Domain mappings',

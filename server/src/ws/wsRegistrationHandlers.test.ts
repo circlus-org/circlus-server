@@ -118,6 +118,23 @@ describe('WebSocket registration handlers', () => {
     expect(dependencies.registerConnection).not.toHaveBeenCalled();
   });
 
+  it('authenticates the no-call declaration and skips pending call delivery', async () => {
+    (query as jest.Mock).mockResolvedValueOnce({ rows: [{
+      device_id: 'device-1', identity_id: 'identity-1', family_id: 'family-1', status: 'active',
+      public_key_algorithm: 'ed25519', public_key_value: 'device-public-key'
+    }] });
+    (verifySignedRequest as jest.Mock).mockReturnValue(true);
+    (identityRepository.findByIdentityId as jest.Mock).mockResolvedValue({ status: 'active' });
+    const { handlers, dependencies } = harness();
+    await handlers.handleLocal(ws, { ...localSignedRequest,
+      payload: { clientRuntime: 'ios_webview', callsEnabled: false } });
+    expect(dependencies.registerConnection).toHaveBeenCalledWith(ws,
+      expect.objectContaining({ familyId: 'family-1', identityId: 'identity-1', deviceId: 'device-1',
+        clientRuntime: 'ios_webview', callsEnabled: false }), { trackDevice: true });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(markWebSocketRegistered).toHaveBeenCalledWith(ws);
+  });
+
   it('preserves the local registration state and response envelope', async () => {
     (query as jest.Mock)
       .mockResolvedValueOnce({

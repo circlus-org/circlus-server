@@ -73,3 +73,24 @@ it('filters member events before both network delivery and HTTP queueing on a ca
   expect(network.send).toHaveBeenCalledTimes(1);
   expect(queue.queue.map(message => message.type)).toEqual(['call:ended']);
 });
+
+
+it('excludes no-call sessions from call delivery and HTTP queueing while preserving messages and other devices', () => {
+  const noCalls = socket(), enabled = socket(), http = socket();
+  const queue = { queue: [] as Array<{ type: string; data: unknown }> };
+  const noCallInfo = { actorType: 'local', familyId: 'circle-a', identityId: 'identity-a', deviceId: 'ios-a', callsEnabled: false } as const;
+  const transport = createWsTransport({
+    findHttpRuntimeQueue: ws => ws === http ? queue : null, maxHttpRuntimeQueue: 10,
+    canSend: (ws, message) => isOutboundMessageAllowedForConnection(ws === enabled ? { ...noCallInfo, deviceId: 'other', callsEnabled: true } : noCallInfo, message.type)
+  });
+  const recipients = new Set([noCalls, enabled, http]);
+  for (const type of ['call:incoming', 'call:ended', 'call:delivery-status']) {
+    transport.sendToSet(recipients, { type, data: {} });
+  }
+  expect(noCalls.send).not.toHaveBeenCalled();
+  expect(queue.queue).toEqual([]);
+  expect(enabled.send).toHaveBeenCalledTimes(3);
+  transport.sendToSet(recipients, { type: 'message:deliver', data: {} });
+  expect(noCalls.send).toHaveBeenCalledTimes(1);
+  expect(queue.queue.map(message => message.type)).toEqual(['message:deliver']);
+});

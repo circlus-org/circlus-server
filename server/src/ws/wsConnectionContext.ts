@@ -14,7 +14,9 @@ export type LocalConnectionInfo = {
   familyId: string;
   isTemporaryDevice?: boolean;
   runtimeMode?: 'default' | 'video-native' | 'direct-file-native';
-  clientRuntime?: 'web' | 'android_webview';
+  clientRuntime?: 'web' | 'android_webview' | 'ios_webview';
+  /** Authenticated ws:register payload. Absent retains existing client behavior. */
+  callsEnabled?: boolean;
   scopedCallSessionId?: CallSessionId;
   scopedDirectFileTransferSessionId?: DirectFileTransferSessionId;
   scopedRemoteIdentityId?: IdentityId;
@@ -44,6 +46,10 @@ export type ExternalConnectionInfo = {
 };
 
 export type ConnectionInfo = LocalConnectionInfo | ExternalConnectionInfo;
+
+export function isIncomingCallRecipient(info: ConnectionInfo | undefined): boolean {
+  return Boolean(info && (info.actorType !== 'local' || info.callsEnabled !== false));
+}
 
 const NATIVE_CALL_RUNTIME_MESSAGE_TYPES = new Set([
   'ping',
@@ -80,6 +86,8 @@ export function isMessageAllowedForConnection(
   info: ConnectionInfo | undefined,
   messageType: string
 ): boolean {
+  if (info?.actorType === 'local' && info.callsEnabled === false
+      && (messageType.startsWith('call:') || messageType === 'register-call-runtime')) return false;
   if (info?.actorType === 'external') {
     return messageType === 'register-external'
       || (messageType !== 'register-call-runtime' && NATIVE_CALL_RUNTIME_MESSAGE_TYPES.has(messageType));
@@ -96,6 +104,7 @@ export function isMessageAllowedForConnection(
 
 /** Registering the same identity as a member never upgrades its old call socket. */
 export function isOutboundMessageAllowedForConnection(info: ConnectionInfo | undefined, messageType: string): boolean {
+  if (info?.actorType === 'local' && info.callsEnabled === false && messageType.startsWith('call:')) return false;
   return info?.actorType !== 'external' || messageType.startsWith('call:')
     || ['registered', 'pong', 'error'].includes(messageType);
 }

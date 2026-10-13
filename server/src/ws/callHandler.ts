@@ -1,3 +1,4 @@
+import { isIncomingCallRecipient } from './wsConnectionContext';
 import { WebSocket } from 'ws';
 import {
   callSessionRepository,
@@ -229,7 +230,7 @@ const callRingingService = new CallRingingService({
   ),
   isTargetOnline: (familyId, targetIdentityId) => {
     const sockets = connectionRegistry.getIdentitySockets(familyId, targetIdentityId);
-    return !!sockets && sockets.size > 0;
+    return !!sockets && Array.from(sockets).some((ws) => isIncomingCallRecipient(connectionRegistry.getInfo(ws)));
   },
   issueBootstrapToken: ({ familyId, callSessionId, targetIdentityId, expiresAt }) => (
     issueMobileCallBootstrapToken({
@@ -409,7 +410,13 @@ function getGeneralIdentitySockets(familyId: string, identityId: IdentityId): Se
 }
 
 function getWebIncomingCallSockets(familyId: string, identityId: IdentityId): Set<WebSocket> | undefined {
-  return getGeneralIdentitySockets(familyId, identityId);
+  const sockets = getGeneralIdentitySockets(familyId, identityId);
+  if (!sockets) return undefined;
+  const eligible = new Set(Array.from(sockets).filter((ws) => {
+    const info = connectionRegistry.getInfo(ws);
+    return isIncomingCallRecipient(info);
+  }));
+  return eligible.size ? eligible : undefined;
 }
 
 const directFileTransferSignaling = new DirectFileTransferSignalingService({

@@ -226,9 +226,13 @@ export class WsRegistrationHandlers {
         return;
       }
 
-      const clientRuntime = signedRequest.payload?.clientRuntime === 'android_webview'
-        ? 'android_webview'
-        : 'web';
+      if (signedRequest.payload?.callsEnabled !== undefined && typeof signedRequest.payload.callsEnabled !== 'boolean') {
+        this.dependencies.sendError(ws, 'INVALID_STATE', 'callsEnabled must be boolean');
+        return;
+      }
+      const clientRuntime = signedRequest.payload?.clientRuntime === 'ios_webview'
+        ? 'ios_webview' : signedRequest.payload?.clientRuntime === 'android_webview'
+          ? 'android_webview' : 'web';
       const info: LocalConnectionInfo = {
         actorType: 'local',
         identityId: device.identity_id,
@@ -236,7 +240,8 @@ export class WsRegistrationHandlers {
         familyId,
         isTemporaryDevice,
         runtimeMode: 'default',
-        clientRuntime
+        clientRuntime,
+        ...(signedRequest.payload?.callsEnabled === false ? { callsEnabled: false } : {})
       };
       this.dependencies.registerConnection(ws, info, { trackDevice: true });
       await this.dependencies.touchConnectionLastSeen(ws, true);
@@ -664,9 +669,10 @@ export class WsRegistrationHandlers {
   private async deliverPendingCalls(
     ws: WebSocket,
     info: LocalConnectionInfo,
-    clientRuntime: 'web' | 'android_webview'
+    clientRuntime: 'web' | 'android_webview' | 'ios_webview'
   ): Promise<void> {
     try {
+      if (info.callsEnabled === false) return;
       if (clientRuntime === 'android_webview' && !info.isTemporaryDevice) return;
 
       const pendingCalls = await query(

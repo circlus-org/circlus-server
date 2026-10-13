@@ -46,7 +46,8 @@ describe('Public migration baseline adoption', () => {
         '014_direct_message_read_proof.sql',
         '015_circle_membership_snapshot_action.sql',
         '016_nullable_rekey_device_id.sql',
-        '017_device_client_version.sql'
+        '017_device_client_version.sql',
+        '018_device_client_protocols.sql'
       ]);
     }
   });
