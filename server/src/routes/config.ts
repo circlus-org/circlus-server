@@ -88,7 +88,7 @@ router.get('/lifecycle', rlCapabilities, async (req: TenancyRequest, res) => {
   const config = await configService.requireFamilyConfig(req.familyId);
   return res.json({
     status: 'ok',
-    result: { circleId: config.circle_id,
+    result: { circleId: config.circle_id, vpsId: getServerIdentityRuntimeConfig().vpsId, mobilePushRoutePolicyVersion: 1,
       ...(req.get('Origin') ? { clientOriginTrust: { version: 1, pageOrigin: req.get('Origin')!,
         trusted: isTrustedClientOrigin(req.get('Origin'), config) } } : {}) }
   } as ApiResponse<{ circleId: string; clientOriginTrust?: { version: number; pageOrigin: string; trusted: boolean } }>);

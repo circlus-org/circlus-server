@@ -111,6 +111,7 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
   webOrigin?: string;
   pushEncryptionPublicKey: string;
   nativeMessagePreviewMode?: string;
+  callsEnabled?: boolean;
 }>, res) => {
   const startedAt = Date.now();
   const familyId = req.familyId;
@@ -126,11 +127,16 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     webOrigin?: string;
     pushEncryptionPublicKey?: string;
     nativeMessagePreviewMode?: string;
+    callsEnabled?: boolean;
   };
   const mobileEndpointId = String(payload.mobileEndpointId || '').trim();
   const deliveryToken = String(payload.deliveryToken || '').trim();
   const deliveryTokenExpiresAtRaw = String(payload.deliveryTokenExpiresAt || '').trim();
   const pushEncryptionPublicKey = String(payload.pushEncryptionPublicKey || '').trim();
+  if (payload.callsEnabled !== undefined && typeof payload.callsEnabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'callsEnabled must be boolean' });
+  }
+  const callsEnabled = payload.callsEnabled !== false;
   const nativeMessagePreviewMode = normalizeNativeMessagePreviewMode(payload.nativeMessagePreviewMode);
   const deliveryTokenExpiresAt = deliveryTokenExpiresAtRaw
     ? new Date(deliveryTokenExpiresAtRaw)
@@ -175,7 +181,8 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     deliveryToken,
     deliveryTokenExpiresAt,
     pushEncryptionPublicKey,
-    nativeMessagePreviewMode
+    nativeMessagePreviewMode,
+    callsEnabled
   });
 
   routeLogger.info('[FamilyServer][mobile:delivery-token:register] success', {
@@ -185,7 +192,7 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     durationMs: Date.now() - startedAt,
   });
 
-  return res.json({ success: true });
+  return res.json({ success: true, callsEnabled, mobilePushRoutePolicyVersion: 1 });
 }, req => 'mobile:'+req.device.deviceId));
 
 router.post('/calls/bootstrap', async (req, res) => {

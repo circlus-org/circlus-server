@@ -185,7 +185,7 @@ describe('encrypted push delivery invariant', () => {
     const result = await sendPushToDevice(
       'family_1',
       'device_1' as any,
-      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice' },
+      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice', messageScope: 'direct', peerIdentityId: 'peer_1' as any },
       'identity_1' as any,
       'https://family.example.test',
       'https://family.example.test',
@@ -264,6 +264,7 @@ describe('encrypted push delivery invariant', () => {
   test('falls back to web relay subscriptions when a mobile binding has no active delivery token', async () => {
     repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({
       route: 'mobile_push',
+      calls_enabled: false,
       mobile_endpoint_id: 'mobile_endpoint_1',
       mobile_endpoint_ref: null,
       web_device_id: 'device_1',
@@ -288,7 +289,7 @@ describe('encrypted push delivery invariant', () => {
     const result = await sendPushToDevice(
       'family_1',
       'device_1' as any,
-      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice' },
+      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice', messageScope: 'direct', peerIdentityId: 'peer_1' as any },
       'identity_1' as any,
       'https://family.example.test',
       'https://family.example.test',
@@ -391,9 +392,28 @@ describe('encrypted push delivery invariant', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test.each([{ recipientDeviceId: 'wrong-device' }, { serverOrigin: 'https://wrong.example' }, { vpsId: 'wrong-vps' }])('rejects conflicting supplied recipient route %p', async supplied => {
+    const { sendPushToDevice } = await importPushModule();
+    await expect(sendPushToDevice('family_1', 'device_1' as any,
+      { type: 'incoming_message', messageId: 'message_1', ...supplied } as any,
+      'identity_1' as any, 'https://family.example.test', 'https://family.example.test', 'server_1', 'Family Server')).rejects.toThrow('PUSH_ROUTE_CONTEXT_INVALID');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId).not.toHaveBeenCalled();
+  });
+  test.each(['incoming_call', 'call_status'])('never delivers %s to a no-call mobile binding or its web fallback', async type => {
+    repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({ route: 'mobile_push', calls_enabled: false });
+    const { sendPushToDevice } = await importPushModule();
+    const result = await sendPushToDevice('family_1', 'device_1' as any,
+      { type, callSessionId: 'call_1' } as any, 'identity_1' as any,
+      'https://family.example.test', 'https://family.example.test', 'server_1', 'Family Server');
+    expect(result).toMatchObject({ attempted: 0, sent: 0, skipped: 1 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repositories.pushSubscriptionRepository.findActiveByDeviceId).not.toHaveBeenCalled();
+  });
   test('sends only an encrypted envelope for mobile bindings with an encryption key', async () => {
     repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({
       route: 'mobile_push',
+      calls_enabled: false,
       mobile_endpoint_id: 'mobile_endpoint_1',
       mobile_endpoint_ref: null,
       web_device_id: 'device_1',
@@ -408,7 +428,7 @@ describe('encrypted push delivery invariant', () => {
     const result = await sendPushToDevice(
       'family_1',
       'device_1' as any,
-      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice' },
+      { type: 'incoming_message', messageId: 'msg_1', fromIdentityName: 'Alice', messageScope: 'direct', peerIdentityId: 'peer_1' as any },
       'identity_1' as any,
       'https://family.example.test',
       'https://family.example.test',
@@ -432,6 +452,7 @@ describe('encrypted push delivery invariant', () => {
       urgency: 'normal',
       ttlSec: 24 * 60 * 60
     });
+    expect(encryptPushPayloadMock).toHaveBeenCalledWith('spki-public-key', expect.objectContaining({ recipientDeviceId: 'device_1', targetIdentityId: 'identity_1', circleId: 'server_1', messageScope: 'direct', peerIdentityId: 'peer_1' }));
     expect(body.provider).toBeUndefined();
     expect(body.providerToken).toBeUndefined();
     expect(body.channel).toBeUndefined();

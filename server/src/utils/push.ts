@@ -123,6 +123,7 @@ export async function sendPushToDevice(
 
   try {
     const missingFields = [
+      !deviceId && 'recipientDeviceId',
       !resolvedCircleId && 'circleId',
       !resolvedServerOrigin && 'serverOrigin',
       !targetIdentityId && 'targetIdentityId',
@@ -131,7 +132,10 @@ export async function sendPushToDevice(
     ].filter(Boolean);
     const mismatchedFields = [
       payload.circleId && payload.circleId !== resolvedCircleId && 'circleId',
-      payload.targetIdentityId && payload.targetIdentityId !== targetIdentityId && 'targetIdentityId'
+      payload.targetIdentityId && payload.targetIdentityId !== targetIdentityId && 'targetIdentityId',
+      payload.recipientDeviceId && payload.recipientDeviceId !== deviceId && 'recipientDeviceId',
+      payload.serverOrigin && payload.serverOrigin !== resolvedServerOrigin && 'serverOrigin',
+      payload.vpsId && payload.vpsId !== getServerIdentityRuntimeConfig().vpsId && 'vpsId'
     ].filter(Boolean);
     if (missingFields.length || mismatchedFields.length) {
       getRequestLogger({ subsystem: 'push' }).error('push_route_context_invalid', {
@@ -148,6 +152,7 @@ export async function sendPushToDevice(
       declineToken: undefined,
       circleId: resolvedCircleId,
       targetIdentityId,
+      recipientDeviceId: deviceId,
       serverOrigin: resolvedServerOrigin,
       vpsId: getServerIdentityRuntimeConfig().vpsId
     };
@@ -155,6 +160,12 @@ export async function sendPushToDevice(
     const ttlSec = ttlSecondsForPayload(routedPayload);
     const activeBinding = await mobileNotificationRepository.getActiveBindingByWebDeviceId(familyId, deviceId);
     if (activeBinding && activeBinding.route === 'mobile_push') {
+      if (activeBinding.calls_enabled === false && (routedPayload.type === 'incoming_call' || routedPayload.type === 'call_status')) {
+        summary.subscriptionsTotal = 1;
+        summary.skipped = 1;
+        return summary;
+      }
+
       const bindingToken = (activeBinding.delivery_token || '').trim();
       const bindingTokenExpiresAt = activeBinding.delivery_token_expires_at?.getTime() || null;
       const bindingTokenStillValid = !bindingTokenExpiresAt || bindingTokenExpiresAt > Date.now();
@@ -675,6 +686,7 @@ export async function sendIncomingMessagePush(
   const payload: PushPayload = withTimestamps(
     {
     type: 'incoming_message',
+    messageScope: params?.channelId ? 'channel' : params?.chatId ? 'group' : 'direct',
     messageId: serverMessageId,
     messageCreatedAt: params?.messageCreatedAt,
     dialogId,

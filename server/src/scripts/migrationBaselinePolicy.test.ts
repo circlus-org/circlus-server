@@ -48,7 +48,8 @@ describe('Public migration baseline adoption', () => {
         '016_nullable_rekey_device_id.sql',
         '017_device_client_version.sql',
         '018_device_client_protocols.sql',
-        '019_tenant_suspension_lifecycle.sql'
+        '019_tenant_suspension_lifecycle.sql',
+        '020_mobile_route_calls_policy.sql'
       ]);
     }
   });

@@ -47,6 +47,15 @@ describe('temporary push registration compatibility', () => {
       rows:sql.includes('SELECT fingerprint') ? [] : [{version_id:'v'}]
     }))}));
   });
+  test('persists explicit no-call policy for the authenticated signing device', async () => {
+    const response = await invoke(cases[0], { payload: { ...cases[0].payload, callsEnabled: false } });
+    expect(response.body).toEqual({ success: true, callsEnabled: false, mobilePushRoutePolicyVersion: 1 });
+    expect(mobileNotificationRepository.upsertDirectMobileRoute).toHaveBeenCalledWith(expect.objectContaining({ familyId: 'family', webDeviceId: 'device', callsEnabled: false }));
+  });
+  test('rejects malformed calls policy before changing a binding', async () => {
+    expect((await invoke(cases[0], { payload: { ...cases[0].payload, callsEnabled: 'false' } })).statusCode).toBe(400);
+    expect(mobileNotificationRepository.upsertDirectMobileRoute).not.toHaveBeenCalled();
+  });
   test('authentication precedes the mobile compatibility adapter', () => {
     expect(mobileRoute.stack[0].handle).toBe(verifySignature);
     expect(mobileRoute.stack[1].handle).toBe(requireActiveIdentity);

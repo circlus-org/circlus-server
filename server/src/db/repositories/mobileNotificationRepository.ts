@@ -21,6 +21,7 @@ export type DeviceBindingRecord = {
   delivery_token_expires_at: Date | null;
   push_encryption_public_key: string | null;
   native_message_preview_mode: NativeMessagePreviewMode;
+  calls_enabled: boolean;
 };
 
 function mapDeviceBinding(row: Record<string, any>): DeviceBindingRecord {
@@ -37,6 +38,7 @@ function mapDeviceBinding(row: Record<string, any>): DeviceBindingRecord {
     delivery_token_expires_at: row.delivery_token_expires_at || null,
     push_encryption_public_key: row.push_encryption_public_key || null,
     native_message_preview_mode: normalizeNativeMessagePreviewMode(row.native_message_preview_mode),
+    calls_enabled: row.calls_enabled !== false,
   };
 }
 
@@ -59,7 +61,7 @@ export class MobileNotificationRepository {
     const result = await dbQuery(
       `SELECT web_device_id, mobile_endpoint_id, mobile_endpoint_ref, route, bound_web_origin, status,
               bound_at, unbound_at, delivery_token, delivery_token_expires_at, push_encryption_public_key,
-              native_message_preview_mode
+              native_message_preview_mode, calls_enabled
          FROM device_notification_bindings
         WHERE family_id = $1
           AND web_device_id = $2
@@ -79,13 +81,14 @@ export class MobileNotificationRepository {
     deliveryTokenExpiresAt?: Date | null;
     pushEncryptionPublicKey: string;
     nativeMessagePreviewMode?: NativeMessagePreviewMode;
+    callsEnabled?: boolean;
   }): Promise<DeviceBindingRecord> {
     const nativeMessagePreviewMode = normalizeNativeMessagePreviewMode(data.nativeMessagePreviewMode);
     const result = await dbQuery(
       `INSERT INTO device_notification_bindings
-         (family_id, web_device_id, mobile_endpoint_id, mobile_endpoint_ref, route, bound_web_origin, status, bound_at, unbound_at, delivery_token, delivery_token_expires_at, push_encryption_public_key, native_message_preview_mode)
+         (family_id, web_device_id, mobile_endpoint_id, mobile_endpoint_ref, route, bound_web_origin, status, bound_at, unbound_at, delivery_token, delivery_token_expires_at, push_encryption_public_key, native_message_preview_mode, calls_enabled)
        VALUES
-         ($1, $2, NULL, $3, 'mobile_push', $4, 'active', NOW(), NULL, $5, $6, $7, $8)
+         ($1, $2, NULL, $3, 'mobile_push', $4, 'active', NOW(), NULL, $5, $6, $7, $8, $9)
        ON CONFLICT (family_id, web_device_id) WHERE status = 'active'
        DO UPDATE SET
          mobile_endpoint_id = NULL,
@@ -98,8 +101,9 @@ export class MobileNotificationRepository {
          delivery_token_expires_at = EXCLUDED.delivery_token_expires_at,
          push_encryption_public_key = EXCLUDED.push_encryption_public_key,
          native_message_preview_mode = EXCLUDED.native_message_preview_mode,
+         calls_enabled = EXCLUDED.calls_enabled,
          updated_at = NOW()
-       RETURNING web_device_id, mobile_endpoint_id, mobile_endpoint_ref, route, bound_web_origin, status, bound_at, unbound_at, delivery_token, delivery_token_expires_at, push_encryption_public_key, native_message_preview_mode`,
+       RETURNING web_device_id, mobile_endpoint_id, mobile_endpoint_ref, route, bound_web_origin, status, bound_at, unbound_at, delivery_token, delivery_token_expires_at, push_encryption_public_key, native_message_preview_mode, calls_enabled`,
       [
         data.familyId,
         data.webDeviceId,
@@ -109,6 +113,7 @@ export class MobileNotificationRepository {
         data.deliveryTokenExpiresAt || null,
         data.pushEncryptionPublicKey,
         nativeMessagePreviewMode,
+        data.callsEnabled !== false,
       ]
     );
     return mapDeviceBinding(result.rows[0]);

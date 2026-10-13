@@ -47,6 +47,7 @@ export async function processAnnouncementChannelPushOutboxOnce(): Promise<boolea
           'Channel',
           {
             channelId: job.channel_id,
+            messageCreatedAt: new Date(post.created_at).getTime(),
             dialogId: job.channel_id,
             notificationPreview: post.notification_preview_ciphertext?.startsWith('npv2:')
               ? {

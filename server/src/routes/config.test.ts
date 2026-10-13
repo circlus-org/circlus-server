@@ -416,7 +416,7 @@ describe('GET /lifecycle: explicit origin trust statement', () => {
       const res = makeResponse();
       await getHandler('/lifecycle')({ familyId: circleId, get: () => 'https://custom-client.invalid' }, res);
       expect(configService.requireFamilyConfig).toHaveBeenLastCalledWith(circleId);
-      expect(res.json).toHaveBeenCalledWith({ status: 'ok', result: { circleId,
+      expect(res.json).toHaveBeenCalledWith({ status: 'ok', result: { circleId, vpsId: 'test-vps', mobilePushRoutePolicyVersion: 1,
         clientOriginTrust: { version: 1, pageOrigin: 'https://custom-client.invalid', trusted } } });
     }
   });
