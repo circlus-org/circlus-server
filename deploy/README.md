@@ -328,6 +328,10 @@ stops with an error; arrange backups for that layout separately. The helper
 does not save Nginx configuration, TLS certificates, external TURN services, or
 anything outside this Compose installation.
 
+The coturn image creates an anonymous `/var/lib/coturn` volume; it is not
+included. The standard TURN configuration authenticates with the backed-up
+shared secret, without accounts stored in that volume.
+
 ### Create and verify a backup
 
 From the repository root, run:

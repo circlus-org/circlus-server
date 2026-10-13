@@ -154,15 +154,71 @@ def expected_mounts(service):
     return mounts[service]
 
 
+def check_server_env_file_sources(compose_source, prebuilt_source):
+    # Some Compose versions omit env_file from `config --no-env-resolution`.
+    # Verify the two fixed input files in that case instead of trusting an
+    # absent field in the rendered configuration.
+    require(len(re.findall(r"(?m)^services:", compose_source)) == 1,
+            "Unsupported Compose services declaration")
+    services = re.findall(r"(?ms)^services:\n(.*?)(?=^\S|\Z)", compose_source)
+    require(len(services) == 1, "Unsupported Compose services declaration")
+    require(len(re.findall(r"(?m)^  server:", services[0])) == 1,
+            "Unsupported Compose server declaration")
+    server = re.findall(r"(?ms)^  server:\n(.*?)(?=^  \S|^\S|\Z)", services[0])
+    require(len(server) == 1, "Unsupported Compose server declaration")
+    lines = server[0].splitlines()
+    positions = [index for index, line in enumerate(lines)
+                 if line.lstrip().startswith("env_file:")]
+    require(len(positions) == 1 and lines[positions[0]] == "    env_file:",
+            "Unsupported server env_file declaration")
+    after = lines[positions[0] + 1:]
+    block = []
+    for line in after:
+        if line.strip() and len(line) - len(line.lstrip()) <= 4:
+            break
+        if line.strip():
+            block.append(line.strip())
+    require(block == ["- ${CIRCLUS_ENV_FILE:-./deploy/.env}"],
+            "Unsupported server env_file declaration")
+    require(not re.search(r"(?m)^\s*(?:include|extends|<<):", compose_source),
+            "Unsupported Compose env_file indirection")
+    require(not re.search(r"(?m)^\s*(?:env_file|include|extends|<<):", prebuilt_source),
+            "Unsupported Compose override of server env_file")
+
+
+def check_server_env_file(raw_config, env_file):
+    env_files = raw_config.get("services", {}).get("server", {}).get("env_file")
+    if env_files is None:
+        check_server_env_file_sources((ROOT / "compose.yaml").read_text(),
+                                      (ROOT / "compose.prebuilt.yaml").read_text())
+        return
+    require(isinstance(env_files, list) and len(env_files) == 1,
+            "Unsupported server env_file path")
+    entry = env_files[0]
+    if isinstance(entry, str):
+        path = entry
+    elif isinstance(entry, dict):
+        require(entry.get("required", True) is True and
+                entry.get("format") in (None, "env"),
+                "Unsupported server env_file options")
+        path = entry.get("path")
+    else:
+        path = None
+    require(isinstance(path, str) and bool(path),
+            "Unsupported server env_file path")
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    require(os.path.abspath(candidate) == os.path.abspath(env_file),
+            "Unsupported server env_file path")
+
+
 def check_config(env_file):
     require_regular(env_file)
     config = json.loads(compose(env_file, "config", "--format", "json").stdout)
     raw_config = json.loads(compose(env_file, "config", "--no-env-resolution",
                                     "--format", "json").stdout)
-    env_files = raw_config.get("services", {}).get("server", {}).get("env_file", [])
-    require(len(env_files) == 1 and isinstance(env_files[0], dict) and
-            env_files[0].get("path") == str(env_file),
-            "Unsupported server env_file path")
+    check_server_env_file(raw_config, env_file)
     require(config.get("name") == PROJECT, "Unsupported Compose project name")
     require(set(config.get("services", {})) == set(
         ("postgres", "server", "migrate", "ice-config-service", "coturn")),
@@ -277,11 +333,35 @@ def check_existing_volumes():
                     f"Unexpected container uses {name}: {container_id}")
 
 
+def runtime_compose_files_match(service, actual_files, expected_files, prebuilt_source):
+    if actual_files == expected_files:
+        return True
+    if len(expected_files) != 2 or service not in ("postgres", "coturn"):
+        return False
+    if actual_files != expected_files[:1]:
+        return False
+    # The prebuilt overlay changes application images, but not these two
+    # infrastructure services. Compose can retain their older containers.
+    return not re.search(rf"(?m)^  {re.escape(service)}:", prebuilt_source) and not re.search(
+        r"(?m)^\s*(?:include|extends|<<):", prebuilt_source)
+
+
+def runtime_mounts_match(service, actual_mounts, expected_mounts, image_volumes=None):
+    if actual_mounts == expected_mounts:
+        return True
+    if service != "coturn" or expected_mounts - actual_mounts:
+        return False
+    extra = actual_mounts - expected_mounts
+    return (image_volumes == {"/var/lib/coturn"} and len(extra) == 1 and
+            next(iter(extra))[:2] == ("/var/lib/coturn", "volume"))
+
+
 def check_runtime_compose_files(env_file):
     config = check_config(env_file)
     expected_files = [str(ROOT / "compose.yaml")]
     if image_tag(env_file):
         expected_files.append(str(ROOT / "compose.prebuilt.yaml"))
+    prebuilt_source = (ROOT / "compose.prebuilt.yaml").read_text()
     ids = run(["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={PROJECT}",
                "--format", "{{.ID}}"]).stdout.decode().splitlines()
     require(ids, "No existing Compose containers to verify")
@@ -290,7 +370,10 @@ def check_runtime_compose_files(env_file):
         labels = info["Config"].get("Labels") or {}
         service = labels.get("com.docker.compose.service")
         require(labels.get("com.docker.compose.project.working_dir") == str(ROOT) and
-                labels.get("com.docker.compose.project.config_files", "").split(",") == expected_files and
+                runtime_compose_files_match(
+                    service,
+                    labels.get("com.docker.compose.project.config_files", "").split(","),
+                    expected_files, prebuilt_source) and
                 service in config["services"],
                 f"Container {container_id} used another Compose checkout or override")
         actual_mounts = {(m["Destination"], m["Type"],
@@ -304,7 +387,13 @@ def check_runtime_compose_files(env_file):
         for secret in config["services"][service].get("secrets", []):
             source = config["secrets"][secret["source"]]["file"]
             expected_mounts.add((secret["target"], "bind", source))
-        require(actual_mounts == expected_mounts,
+        image_volumes = None
+        if service == "coturn" and actual_mounts != expected_mounts:
+            require(config["services"][service].get("image") == "coturn/coturn:4.15.0-r0",
+                    "Unsupported coturn image")
+            image_info = json.loads(run(["docker", "image", "inspect", info["Image"]]).stdout)[0]
+            image_volumes = set((image_info.get("Config") or {}).get("Volumes") or {})
+        require(runtime_mounts_match(service, actual_mounts, expected_mounts, image_volumes),
                 f"Runtime mounts differ from the standard layout in {service}")
         if service != "migrate":
             actual_env = dict(entry.split("=", 1) for entry in info["Config"].get("Env", [])
