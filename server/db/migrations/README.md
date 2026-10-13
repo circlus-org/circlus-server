@@ -5,7 +5,7 @@ files already recorded in `schema_migrations`:
 
 | Migration | Description |
 |-----------|-------------|
-| `001_initial_schema.sql` | Initial schema; fresh installations then apply `002`–`012` |
+| `001_initial_schema.sql` | Initial schema; fresh installations then apply all forward migrations |
 | `002_managed_push_configuration.sql` | Managed Notification Central connection |
 | `003_archive_legacy_circle_membership_v1.sql` | Archive obsolete V1 membership state before signed V2 replacement |
 | `004_remove_server_admin_owner_recovery.sql` | Remove unsigned server-admin Circle ownership recovery |
@@ -17,6 +17,18 @@ files already recorded in `schema_migrations`:
 | `010_delete_legacy_identity_backups.sql` | Remove obsolete lookup-secret identity backups |
 | `011_encrypt_private_link_and_device_metadata.sql` | Remove plaintext private link and device labels |
 | `012_encrypt_channel_metadata_and_reaction_codes.sql` | Encrypt channel metadata and make reaction values opaque to the server |
+| `013_call_handling_blocking_session.sql` | Track the session blocking call handling |
+| `014_direct_message_read_proof.sql` | Store signed direct-message read proofs |
+| `015_circle_membership_snapshot_action.sql` | Record membership snapshot actions |
+| `016_nullable_rekey_device_id.sql` | Allow rekey operations without an initiating device |
+| `017_device_client_version.sql` | Store device client version metadata |
+| `018_device_client_protocols.sql` | Store supported device protocol versions |
+| `019_tenant_suspension_lifecycle.sql` | Add Circle suspension fields and statuses missing from the public baseline |
+
+Migration 019 preserves the published initial schema. It converts revoked Circles
+that retain an owner to suspended, preserving data and timestamps; ownerless
+revoked Circles remain revoked. Do not copy private migration history into a
+public installation.
 
 Fresh installations apply all migrations through `npm run migrate` or the
 bundled Docker Compose migrator service.

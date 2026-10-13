@@ -498,8 +498,10 @@ def create_backup(*, leave_stopped=False):
     image = config["services"]["postgres"]["image"]
     require_image(image)
     commit = current_commit()
-    tracked_changes = run(["git", "-c", f"safe.directory={ROOT}", "status",
-                           "--porcelain", "--untracked-files=no"]).stdout.strip()
+    # A backup runs as root. Do not let `git status` refresh the user's index
+    # and replace .git/index with a root-owned file.
+    tracked_changes = run(["git", "--no-optional-locks", "-c", f"safe.directory={ROOT}",
+                           "status", "--porcelain", "--untracked-files=no"]).stdout.strip()
     require(not tracked_changes, "Tracked checkout files have local changes; commit or revert them first")
     backup_root = ROOT / "backups"
     require(not backup_root.is_symlink(), "backups/ must not be a symlink")
