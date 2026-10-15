@@ -45,6 +45,8 @@ import { createWsTransport } from './wsTransport';
 import {
   isMessageAllowedForConnection,
   nativeCallScopeFailure,
+  nativeCallCommandScopeFailure,
+  callCommandSessionId,
   isOutboundMessageAllowedForConnection,
   type LocalConnectionInfo
 } from './wsConnectionContext';
@@ -1039,7 +1041,13 @@ export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
       return;
     }
 
-    if (message.type.startsWith('call:') && !assertRuntimeScopedCallSession(ws, message.data?.callSessionId)) return;
+    if (message.type.startsWith('call:')) {
+      const failure = nativeCallCommandScopeFailure(existingInfo, message.type, message.data);
+      if (failure) {
+        logger.warn('call_runtime_scope_rejected', { operation: 'call.runtimeScope', ...failure });
+        sendError(ws, 'FORBIDDEN', failure.reason); return;
+      }
+    }
 
     if (message.type !== 'ping') {
       const { bucket, count, limit, limitExceeded } = wsRateLimiter.consume(ws, message.type);
@@ -1064,10 +1072,10 @@ export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
       'call:ice-candidate', 'call:video-state', 'call:renegotiate-offer',
       'call:renegotiate-answer', 'call:connected', 'call:heartbeat', 'call:hangup', 'call:cancel'
     ].includes(message.type)) {
-      const callSessionId = message.data?.callSessionId || message.data?.payload?.callSessionId;
+      const callSessionId = callCommandSessionId(message.type, message.data);
       if (typeof callSessionId === 'string') callSignalingRecovery.resume(ws, existingInfo, callSessionId);
     }
-    const scopedCallId = message.data?.callSessionId;
+    const scopedCallId = callCommandSessionId(message.type, message.data);
     const info = connectionRegistry.getInfo(ws);
     const handled = serialized && info && typeof scopedCallId === 'string' && scopedCallId.trim()
       ? await callOperations.run(info.familyId, scopedCallId, async () => { await callSdpRecovery.execute(ws, info, message, () => dispatchWsMessage(ws, message)); return true; }, () => connectionRegistry.getInfo(ws) === info)

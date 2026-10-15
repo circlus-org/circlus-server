@@ -63,6 +63,24 @@ export function nativeCallScopeFailure(info: ConnectionInfo | undefined, callSes
   if (info.scopedCallSessionId !== callSessionId) return { reason: 'CALL_RUNTIME_CALL_MISMATCH' };
 }
 
+/** The existing lifecycle wire contract carries its authority in payload;
+ * SDP/media commands carry it directly. Never substitute between formats. */
+export function callCommandSessionId(type: string, data: any): unknown {
+  return ['call:connected', 'call:heartbeat', 'call:finalized'].includes(type)
+    ? data?.payload?.callSessionId : data?.callSessionId;
+}
+
+export function nativeCallCommandScopeFailure(info: ConnectionInfo | undefined, type: string, data: any) {
+  const callSessionId = callCommandSessionId(type, data);
+  const failure = nativeCallScopeFailure(info, callSessionId);
+  if (failure) return failure;
+  if (info?.actorType === 'local' && info.runtimeMode === 'video-native'
+      && ['call:connected', 'call:heartbeat', 'call:finalized'].includes(type)
+      && data?.callSessionId !== undefined && data.callSessionId !== callSessionId) {
+    return { reason: 'CALL_RUNTIME_CALL_MISMATCH' };
+  }
+}
+
 export function isIncomingCallRecipient(info: ConnectionInfo | undefined): boolean {
   return Boolean(info && (info.actorType !== 'local' || (info.callsEnabled !== false && info.callRuntimePurpose !== 'terminal')));
 }

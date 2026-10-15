@@ -1,6 +1,8 @@
 import type { WebSocket } from 'ws';
 import type { AuthenticatedActor } from '../services/authenticatedActor';
 import { CallLifecycleWsHandlers, type CallLifecycleWsHandlerDependencies } from './callLifecycleWsHandlers';
+import { nativeCallScopeFailure, type ConnectionInfo } from './wsConnectionContext';
+import { requireWsActor } from './wsActor';
 
 const ws = {} as WebSocket;
 const actor: AuthenticatedActor = {
@@ -30,6 +32,28 @@ function harness(overrides: Partial<CallLifecycleWsHandlerDependencies> = {}) {
 }
 
 describe('call lifecycle WebSocket handlers', () => {
+  it('rejects flat native lifecycle reports and accepts the nested contract for the exact call and device', async () => {
+    const info = { ...actor, actorType: 'local', runtimeMode: 'video-native', scopedCallSessionId: 'call-1' } as ConnectionInfo;
+    const errors = jest.fn();
+    const { handlers, dependencies } = harness({
+      requireActor: (_ws, deviceId) => requireWsActor(ws, () => info, errors, deviceId),
+      assertRuntimeScope: (_ws, callSessionId) => {
+        const failure = nativeCallScopeFailure(info, callSessionId);
+        if (failure) errors('FORBIDDEN', failure.reason);
+        return !failure;
+      }
+    });
+    await handlers.handleConnected(ws, { callSessionId: 'call-1', connectedAt: 10 } as unknown as Parameters<typeof handlers.handleConnected>[1]);
+    expect(errors).toHaveBeenLastCalledWith('FORBIDDEN', 'CALL_ROUTE_INCOMPLETE');
+    expect(dependencies.markCallConnected).not.toHaveBeenCalled();
+    await handlers.handleConnected(ws, { deviceId: actor.deviceId, payload: { callSessionId: 'call-1', connectedAt: 10 } });
+    expect(dependencies.markCallConnected).toHaveBeenCalledWith(actor, { callSessionId: 'call-1', connectedAt: 10 });
+    await handlers.handleHeartbeat(ws, { deviceId: actor.deviceId, payload: { callSessionId: 'call-1', connectedAt: 10, sentAt: 20 } });
+    expect(dependencies.markCallHeartbeat).toHaveBeenCalledTimes(1);
+    await handlers.handleHeartbeat(ws, { deviceId: actor.deviceId, payload: { callSessionId: 'other-call', connectedAt: 10, sentAt: 20 } });
+    await handlers.handleHeartbeat(ws, { deviceId: 'other-device', payload: { callSessionId: 'call-1', connectedAt: 10, sentAt: 20 } });
+    expect(dependencies.markCallHeartbeat).toHaveBeenCalledTimes(1);
+  });
   it('returns call history through the transport boundary', async () => {
     const { handlers, dependencies } = harness();
     await handlers.handleHistorySync(ws, {

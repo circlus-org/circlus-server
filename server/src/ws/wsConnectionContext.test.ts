@@ -1,4 +1,4 @@
-import { nativeCallScopeFailure, isOutboundMessageAllowedForConnection, isIncomingCallRecipient, isMessageAllowedForConnection, type LocalConnectionInfo } from './wsConnectionContext';
+import { nativeCallCommandScopeFailure, callCommandSessionId, nativeCallScopeFailure, isOutboundMessageAllowedForConnection, isIncomingCallRecipient, isMessageAllowedForConnection, type LocalConnectionInfo } from './wsConnectionContext';
 
 const nativeRuntime: LocalConnectionInfo = {
   actorType: 'local',
@@ -96,6 +96,21 @@ it('terminal runtime cannot receive incoming calls, bind media, resume or send m
 
 describe('native call-runtime v1 explicit command scope', () => {
   const info = { ...nativeRuntime, scopedCallSessionId: 'call-1' };
+  it.each(['call:connected', 'call:heartbeat', 'call:finalized'])('uses the declared nested lifecycle format for %s', type => {
+    expect(nativeCallCommandScopeFailure(info, type, { payload: { callSessionId: 'call-1' } })).toBeUndefined();
+    expect(nativeCallCommandScopeFailure(info, type, { callSessionId: 'call-1', payload: { callSessionId: 'call-1' } })).toBeUndefined();
+    expect(nativeCallCommandScopeFailure(info, type, { callSessionId: 'call-1' })?.reason).toBe('CALL_ROUTE_INCOMPLETE');
+    expect(nativeCallCommandScopeFailure(info, type, { callSessionId: 'other', payload: { callSessionId: 'call-1' } })?.reason).toBe('CALL_RUNTIME_CALL_MISMATCH');
+    expect(nativeCallCommandScopeFailure(info, type, { payload: { callSessionId: 'other' } })?.reason).toBe('CALL_RUNTIME_CALL_MISMATCH');
+    expect(callCommandSessionId(type, { callSessionId: 'other' })).toBeUndefined();
+  });
+  it('does not substitute lifecycle payloads into media/SDP commands or another Circle connection', () => {
+    expect(nativeCallCommandScopeFailure(info, 'call:offer', { payload: { callSessionId: 'call-1' } })?.reason).toBe('CALL_ROUTE_INCOMPLETE');
+    const otherCircle = { ...info, familyId: 'family-2', identityId: 'identity-2', deviceId: 'device-2', scopedCallSessionId: 'call-2' };
+    const data = { payload: { callSessionId: 'call-1' } };
+    expect(nativeCallCommandScopeFailure(info, 'call:connected', data)).toBeUndefined();
+    expect(nativeCallCommandScopeFailure(otherCircle, 'call:connected', data)?.reason).toBe('CALL_RUNTIME_CALL_MISMATCH');
+  });
   it.each([undefined, null, '', '  ', 1, {}, ['call-1']])('rejects absent or malformed call ID %p', id => {
     expect(nativeCallScopeFailure(info, id)).toEqual({ reason: 'CALL_ROUTE_INCOMPLETE', missingFields: ['callSessionId'] });
   });
