@@ -25,6 +25,9 @@ files already recorded in `schema_migrations`:
 | `018_device_client_protocols.sql` | Store supported device protocol versions |
 | `019_tenant_suspension_lifecycle.sql` | Add Circle suspension fields and statuses missing from the public baseline |
 | `020_mobile_route_calls_policy.sql` | Persist the explicit no-call policy of a mobile notification binding |
+| `021_mobile_call_readiness_expiry.sql` | Expire mobile call readiness and separate standard and VoIP bindings |
+| `022_call_admission_journal.sql` | Persist call admission and cancellation outcomes |
+| `023_call_runtime_recovery.sql` | Persist selected call devices, SDP outcomes and pending deliveries across API restarts |
 
 Migration 019 preserves the published initial schema. It converts revoked Circles
 that retain an owner to suspended, preserving data and timestamps; ownerless

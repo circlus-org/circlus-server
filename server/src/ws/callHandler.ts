@@ -1,3 +1,6 @@
+import { callRuntimeRecoveryStore } from '../services/callRuntimeRecoveryStore';
+import { CallSdpRecovery } from '../services/callSdpRecovery';
+import { nativeCallMediaAuthority } from './nativeCallMediaAuthority';
 import { isIncomingCallRecipient } from './wsConnectionContext';
 import { WebSocket } from 'ws';
 import {
@@ -41,10 +44,15 @@ import { createWsMessageDispatcher, type WsMessageHandlerMap } from './wsMessage
 import { createWsTransport } from './wsTransport';
 import {
   isMessageAllowedForConnection,
+  nativeCallScopeFailure,
   isOutboundMessageAllowedForConnection,
   type LocalConnectionInfo
 } from './wsConnectionContext';
 import { CallLifecycleWsHandlers } from './callLifecycleWsHandlers';
+import { CallIceWsHandler } from './callIceWsHandler';
+import { configService } from '../services/configService';
+import { getMobileCallIceServers } from '../services/mobileCallIce';
+import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 import { DirectMessageWsHandlers } from './directMessageWsHandlers';
 import {
   WsRegistrationHandlers,
@@ -60,6 +68,8 @@ import { configureWsGateway } from './wsGateway';
 import { WsRateLimiter } from './wsRateLimiter';
 import { getCallRuntimeConfig } from '../config/serverRuntimeConfig';
 import { EarlyEndedCallSessionRegistry } from '../services/earlyEndedCallSessionRegistry';
+import { callAdmissionJournal } from '../services/callAdmissionJournal';
+import { CallOperationQueue } from '../services/callOperationQueue';
 import { serverLogger } from '../utils/logger';
 import type {
   WebSocketMessage,
@@ -103,6 +113,7 @@ const logger = serverLogger.child({ component: 'websocket' });
 // Tracks the concrete sockets selected for each call, including multi-device answers.
 const callSessionRouting = new CallSessionRoutingRegistry();
 const connectionRegistry = new WsConnectionRegistry();
+const callOperations = new CallOperationQueue();
 
 export function setSocketFamilyContext(ws: WebSocket, familyId: string, circleId?: string) {
   connectionRegistry.setFamilyContext(ws, familyId);
@@ -329,12 +340,101 @@ const wsTransport = createWsTransport({
   canSend: (ws, message) => isOutboundMessageAllowedForConnection(connectionRegistry.getInfo(ws), message.type)
 });
 function sendMessage(ws: WebSocket, message: WebSocketMessage): void {
+  message = callSdpRecovery.capture(ws, message);
+  if (callSdpRecovery.deferSend(() => sendMessage(ws, message))) return;
   if (callSignalingRecovery?.buffer(ws, message)) return;
   wsTransport.send(ws, message);
+  if (message.type === 'registered') {
+    const info = connectionRegistry.getInfo(ws);
+    if (info?.actorType === 'local' && info.scopedCallSessionId && !info.callRuntimePurpose) {
+      // Registration must reach the wire before any buffered SDP. In particular
+      // HTTP v2 receivers reject description events before their registered event.
+      queueMicrotask(() => {
+        if (connectionRegistry.getInfo(ws) === info) callSignalingRecovery.resume(ws, info, info.scopedCallSessionId!);
+      });
+    }
+  }
 }
-const sendError = wsTransport.sendError;
-const sendToConnectionSet = wsTransport.sendToSet;
+function sendError(ws: WebSocket, code: string, message: string): void {
+  const reply: WebSocketMessage = { type: 'error', data: { code, message }, timestamp: Date.now() };
+  sendMessage(ws, reply);
+}
+const sendToConnectionSet = (sockets: Set<WebSocket> | undefined, message: WebSocketMessage) => {
+  for (const ws of sockets || []) sendMessage(ws, message);
+};
 let callSignalingRecovery: CallSignalingRecovery;
+const callSdpRecovery = new CallSdpRecovery({
+  info: ws => connectionRegistry.getInfo(ws), send: wsTransport.send,
+  authorize: authorizeSdpRecovery,
+  store: callRuntimeRecoveryStore,
+  route: callId => callSessionRouting.get(callId),
+  invalidateRoute: callId => { callSessionRouting.remove(callId); },
+  current: (ws, info, callId) => {
+    const route = callSessionRouting.get(callId);
+    if (!route) return info.callRuntimeRole === 'caller'; // Async authorization already checked admission state.
+    if (route.familyId !== info.familyId) return false;
+    return info.callRuntimeRole === 'caller'
+      ? route.initiatorIdentityId === info.identityId && route.targetIdentityId === info.scopedRemoteIdentityId
+        && route.initiatorDeviceId === info.deviceId && route.initiatorWs === ws
+      : route.targetIdentityId === info.identityId && route.initiatorIdentityId === info.scopedRemoteIdentityId
+        && (!route.acceptedTargetDeviceId || (route.acceptedTargetDeviceId === info.deviceId && route.acceptedTargetWs === ws));
+  },
+  diagnostic: data => logger.warn('call_sdp_recovery_rejected', data)
+});
+async function restoreCallRoute(familyId: string, callId: string): Promise<void> {
+  const record = await callRuntimeRecoveryStore.load(familyId, callId);
+  if (!record) return; // No backfill from participants, current profile or sole device.
+  const call = await callSessionRepository.findByCallSessionId(familyId, callId), route = record.route;
+  if (!call || ['ended', 'expired', 'failed'].includes(call.state)) return;
+  if (route.familyId !== familyId || call.initiator !== route.initiatorIdentityId || call.participants.length !== 2
+      || new Set(call.participants).size !== 2 || !call.participants.includes(route.initiatorIdentityId)
+      || !call.participants.includes(route.targetIdentityId)
+      || (['accepted', 'active'].includes(call.state) && !route.acceptedTargetDeviceId)) {
+    logger.warn('call_route_rejected', { operation: 'call.routeRestore', reason: 'CALL_DURABLE_ROUTE_MISMATCH' }); return;
+  }
+  callSessionRouting.restore(callId, route);
+}
+async function authorizeSdpRecovery(ws: WebSocket, info: LocalConnectionInfo, callId: string, type: string): Promise<boolean> {
+  const reject = (reason: string, missingFields?: string[]) => {
+    logger.warn('call_sdp_recovery_rejected', { operation: type, reason, ...(missingFields ? { missingFields } : {}) });
+    sendError(ws, 'FORBIDDEN', reason); return false;
+  };
+  if (!info.scopedRemoteIdentityId || !info.callRuntimeRole || !info.deviceId || info.scopedCallSessionId !== callId || info.callRuntimePurpose) {
+    return reject('CALL_SDP_SCOPE_REQUIRED', ['scopedCallSessionId', 'scopedRemoteIdentityId', 'deviceId', 'callRuntimeRole']);
+  }
+  const call = await callSessionRepository.findByCallSessionId(info.familyId, callId);
+  if (connectionRegistry.getInfo(ws) !== info) return reject('CALL_SDP_AUTHORITY_CHANGED');
+  if (!call) {
+    return info.callRuntimeRole === 'caller' && ['call:offer', 'call:resume'].includes(type)
+      ? true : reject('CALL_SDP_CALL_REQUIRED');
+  }
+  if (['ended', 'expired', 'failed'].includes(call.state)) {
+    sendMessage(ws, { type: 'call:ended', data: { callSessionId: callId, reason: call.state }, timestamp: Date.now() }); return false;
+  }
+  if (!callSessionRouting.get(callId)) await restoreCallRoute(info.familyId, callId);
+  let route = callSessionRouting.get(callId);
+  if (!route) return reject('CALL_SDP_ROUTE_REQUIRED', ['callRoute']);
+  if (route.familyId !== info.familyId || call.participants.length !== 2 || new Set(call.participants).size !== 2
+      || !call.participants.includes(info.identityId) || !call.participants.includes(info.scopedRemoteIdentityId)
+      || call.initiator !== route.initiatorIdentityId) return reject('CALL_SDP_ROUTE_MISMATCH');
+  if (info.callRuntimeRole === 'callee' && ['new', 'ringing'].includes(call.state)
+      && ['call:answer', 'call:resume'].includes(type) && !route.acceptedTargetDeviceId
+      && route.targetIdentityId === info.identityId && route.initiatorIdentityId === info.scopedRemoteIdentityId) return true;
+  // Registration can precede the first offer's admission. Bind a subsequently
+  // detached endpoint only with its exact selected device proof, never a guess.
+  const caller = info.callRuntimeRole === 'caller';
+  const old = caller ? route.initiatorWs : route.acceptedTargetWs;
+  const device = caller ? route.initiatorDeviceId : route.acceptedTargetDeviceId;
+  if (['call:resume', 'call:offer', 'call:answer', 'call:renegotiate-offer', 'call:renegotiate-answer'].includes(type) && device === info.deviceId && (!old || old.readyState !== WebSocket.OPEN)
+      && (caller ? route.initiatorIdentityId === info.identityId && route.targetIdentityId === info.scopedRemoteIdentityId
+        : route.targetIdentityId === info.identityId && route.initiatorIdentityId === info.scopedRemoteIdentityId)) {
+    callSessionRouting[caller ? 'bindInitiatorRuntime' : 'bindTargetRuntime']({ callSessionId: callId, identityId: info.identityId, deviceId: info.deviceId, ws });
+    route = callSessionRouting.get(callId)!;
+  }
+  const reason = nativeCallMediaAuthority({ ws, info, currentInfo: connectionRegistry.getInfo(ws), callSessionId: callId, call, route });
+  return reason ? reject(reason) : true;
+}
+
 
 httpCallRuntimeSessionManager = new HttpCallRuntimeSessionManager({
   handleMessage,
@@ -570,13 +670,10 @@ function sendWsServiceError(ws: WebSocket, error: unknown, fallbackMessage: stri
 
 function assertRuntimeScopedCallSession(ws: WebSocket, callSessionId?: string): boolean {
   const info = connectionRegistry.getInfo(ws);
-  if (
-    info?.actorType === 'local'
-    && info.runtimeMode === 'video-native'
-    && info.scopedCallSessionId
-    && info.scopedCallSessionId !== callSessionId
-  ) {
-    sendError(ws, 'FORBIDDEN', 'Call runtime registration is not valid for this call');
+  const failure = nativeCallScopeFailure(info, callSessionId);
+  if (failure) {
+    logger.warn('call_runtime_scope_rejected', { operation: 'call.runtimeScope', ...failure });
+    sendError(ws, 'FORBIDDEN', failure.reason);
     return false;
   }
   return true;
@@ -612,10 +709,7 @@ const wsRegistrationHandlers = new WsRegistrationHandlers({
   registerConnection: (ws, info, options) => {
     if (ws.readyState !== WebSocket.OPEN) throw new Error('WebSocket closed during registration');
     connectionRegistry.register(ws, info, options);
-    if (info.actorType === 'local' && info.scopedCallSessionId) {
-      const callSessionId = info.scopedCallSessionId;
-      queueMicrotask(() => callSignalingRecovery.resume(ws, info, callSessionId));
-    }
+    callSdpRecovery.remember(ws, info);
   },
   sendMessage,
   sendError,
@@ -623,6 +717,7 @@ const wsRegistrationHandlers = new WsRegistrationHandlers({
   isTemporaryCallTargetAllowed,
   replayStoredIceCandidates,
   callSessionRouting,
+  restoreCallRoute,
   describeSocket,
   logCallDiag,
   validateDirectFileRuntimeRegistration: (scope) => (
@@ -631,6 +726,9 @@ const wsRegistrationHandlers = new WsRegistrationHandlers({
 });
 
 const callSignalingWsHandlers = new CallSignalingWsHandlers({
+  deliverSdp: (info, message) => callSdpRecovery.deliverPeer(info, message),
+  hasDurableSdpPeer: (info, callId) => callSdpRecovery.hasDurablePeer(info, callId),
+  prepareOffer: (scope, create) => callAdmissionJournal.create(scope, create),
   logger: logger.child({ subsystem: 'call_signaling' }),
   getConnectionInfo: (ws) => connectionRegistry.getInfo(ws),
   getWebIncomingCallSockets,
@@ -657,6 +755,9 @@ const callSignalingWsHandlers = new CallSignalingWsHandlers({
 });
 
 const callTerminationWsHandlers = new CallTerminationWsHandlers({
+  cancelBeforeOffer: (scope, actionId) => callAdmissionJournal.cancelBeforeOffer(scope, actionId),
+  hasOfferedRoute: scope => callAdmissionJournal.hasOfferedRoute(scope),
+  endAdmission: async (family, call) => { await callAdmissionJournal.end(family, call); await callRuntimeRecoveryStore.close(family, call); callSdpRecovery.close(family, call); },
   logger: logger.child({ subsystem: 'call_termination' }),
   getConnectionInfo: (ws) => connectionRegistry.getInfo(ws),
   getIdentitySockets: (familyId, identityId) => (
@@ -678,7 +779,7 @@ const callTerminationWsHandlers = new CallTerminationWsHandlers({
 
 callSignalingRecovery = new CallSignalingRecovery({
   routes: callSessionRouting,
-  send: wsTransport.send,
+  send: sendMessage,
   expire: (callSessionId, route, reason) => reason === 'superseded_by_redial'
     ? callTerminationWsHandlers.terminateForSupersededRedial(callSessionId, route)
     : callTerminationWsHandlers.terminateForSignalingTimeout(callSessionId, route),
@@ -729,6 +830,20 @@ configureWsGateway({
   closeHttpCallRuntimeSession: (...params) => httpCallRuntimeSessionManager.close(...params)
 });
 
+const callIceWsHandler = new CallIceWsHandler({
+  getInfo: ws => connectionRegistry.getInfo(ws),
+  getCircleId: ws => connectionRegistry.getCircleContext(ws),
+  getVpsId: () => getServerIdentityRuntimeConfig().vpsId,
+  getRoute: id => callSessionRouting.get(id),
+  getConfig: family => configService.getFamilyConfig(family),
+  getCall: (family, id) => callSessionRepository.findByCallSessionId(family, id),
+  getDevice: (family, id) => deviceRepository.findByDeviceId(family, id as DeviceId),
+  getIdentity: (family, id) => identityRepository.findByIdentityId(family, id as IdentityId),
+  getIce: getMobileCallIceServers,
+  send: sendMessage, reject: sendError,
+  diagnostic: data => logger.warn('call_ice_config_rejected', data)
+});
+
 const wsMessageHandlers = {
   ping: (ws) => touchConnectionLastSeen(ws),
   register: (ws, data) => wsRegistrationHandlers.handleLocal(
@@ -754,6 +869,7 @@ const wsMessageHandlers = {
   'call:renegotiate-offer': (ws, data) => callSignalingWsHandlers.handleRenegotiateOffer(ws, data),
   'call:renegotiate-answer': (ws, data) => callSignalingWsHandlers.handleRenegotiateAnswer(ws, data),
   'call:ice-candidate': (ws, data) => callSignalingWsHandlers.handleIceCandidate(ws, data),
+  'call:ice-config': (ws, data) => callIceWsHandler.handle(ws, data),
   'call:video-state': (ws, data) => callSignalingWsHandlers.handleVideoState(
     ws,
     data as WSCallVideoStateData
@@ -840,6 +956,10 @@ const wsMessageHandlers = {
     ws,
     data as WSCallHeartbeatData
   ),
+  'call:sdp-ack': async (ws, data) => {
+    const info = connectionRegistry.getInfo(ws);
+    if (info) await callSdpRecovery.acknowledge(ws, info, data);
+  },
   'call:resume': async (ws, data) => {
     const info = connectionRegistry.getInfo(ws);
     const callSessionId = String((data as WSCallResumeData | undefined)?.callSessionId || '').trim();
@@ -848,6 +968,12 @@ const wsMessageHandlers = {
         ? 'Not authenticated'
         : 'Missing callSessionId');
       return;
+    }
+    if (info.actorType === 'local' && info.sdpRecoveryVersion === 1) {
+      if (!await authorizeSdpRecovery(ws, info, callSessionId, 'call:resume')) return;
+      callSignalingRecovery.resume(ws, info, callSessionId);
+      sendMessage(ws, { type: 'call:resumed', data: { callSessionId, resumed: true, reason: 'sdp_reconciled', sdpRecoveryVersion: 1 }, timestamp: Date.now() });
+      await callSdpRecovery.replay(ws, info, callSessionId); return;
     }
     const resumed = callSignalingRecovery.resume(ws, info, callSessionId);
     const route = callSessionRouting.get(callSessionId);
@@ -896,6 +1022,8 @@ const dispatchWsMessage = createWsMessageDispatcher(wsMessageHandlers);
  */
 export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
   try {
+    const sourceInfo = connectionRegistry.getInfo(ws);
+    const serialized = ['call:offer', 'call:answer', 'call:renegotiate-offer', 'call:renegotiate-answer', 'call:cancel', 'call:decline', 'call:hangup'].includes(message.type);
     const socketFamilyId = connectionRegistry.getFamilyContext(ws);
     if (socketFamilyId) {
       const freeze = await getCircleFreezeState(socketFamilyId);
@@ -904,11 +1032,14 @@ export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
         return;
       }
     }
+    if ((serialized || message.type.startsWith('call:')) && connectionRegistry.getInfo(ws) !== sourceInfo) throw new Error('CALL_OPERATION_AUTHORITY_CHANGED');
     const existingInfo = connectionRegistry.getInfo(ws);
     if (!isMessageAllowedForConnection(existingInfo, message.type)) {
       sendError(ws, 'FORBIDDEN', 'Message type is not allowed for this runtime socket');
       return;
     }
+
+    if (message.type.startsWith('call:') && !assertRuntimeScopedCallSession(ws, message.data?.callSessionId)) return;
 
     if (message.type !== 'ping') {
       const { bucket, count, limit, limitExceeded } = wsRateLimiter.consume(ws, message.type);
@@ -936,11 +1067,19 @@ export async function handleMessage(ws: WebSocket, message: WebSocketMessage) {
       const callSessionId = message.data?.callSessionId || message.data?.payload?.callSessionId;
       if (typeof callSessionId === 'string') callSignalingRecovery.resume(ws, existingInfo, callSessionId);
     }
-    const handled = await dispatchWsMessage(ws, message);
+    const scopedCallId = message.data?.callSessionId;
+    const info = connectionRegistry.getInfo(ws);
+    const handled = serialized && info && typeof scopedCallId === 'string' && scopedCallId.trim()
+      ? await callOperations.run(info.familyId, scopedCallId, async () => { await callSdpRecovery.execute(ws, info, message, () => dispatchWsMessage(ws, message)); return true; }, () => connectionRegistry.getInfo(ws) === info)
+      : await dispatchWsMessage(ws, message);
     if (!handled) {
       sendError(ws, 'UNKNOWN_MESSAGE_TYPE', `Unknown message type: ${message.type}`);
     }
   } catch (error) {
+    if (error instanceof Error && error.message === 'CALL_OPERATION_AUTHORITY_CHANGED') {
+      logger.warn('call_operation_rejected', { operation: 'call.dispatch', reason: 'CALL_OPERATION_AUTHORITY_CHANGED' });
+      sendError(ws, 'FORBIDDEN', 'Call operation context is no longer current'); return;
+    }
     logger.error('ws_message_handling_failed', {
       messageType: message.type,
       socket: describeSocket(ws),

@@ -305,6 +305,32 @@ Deployment questions and ideas about the protocol or product can be discussed
 in GitHub issues. Please report suspected vulnerabilities privately as described
 in the [security policy](SECURITY.md).
 
+### Migration 018 checksum compatibility
+
+An early source installation may have recorded checksum
+`68df1ed1a05963ce74f6699aaccc61b091d6cb8d9114a7b0944275377da98899` for
+`018_device_client_protocols.sql`. The published file has checksum
+`192d03fdfccc7b5e9723ff3c3ba9dd76d466bee52143d089c3b293446ef7d6d6`:
+only one documentation reference in a SQL comment changed; the DDL is identical.
+The migrator recognizes exactly this audited transition, emits
+`KNOWN_COMMENT_ONLY_MIGRATION_CHECKSUM`, skips the already applied SQL and keeps
+the original history row. Public installations with the published checksum use
+the normal exact-match path. All other mismatches still stop the update.
+
+Do not delete the history row, rerun 018, or manually replace its checksum.
+Update the migrator code and rerun the normal migration command. This fix does
+not add a database migration or change the published 018 file. Check the applied
+state without exposing credentials:
+
+```sql
+SELECT version, checksum, applied_at
+FROM public.schema_migrations
+WHERE version IN ('018_device_client_protocols.sql',
+                  '019_tenant_suspension_lifecycle.sql',
+                  '020_mobile_route_calls_policy.sql')
+ORDER BY version;
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

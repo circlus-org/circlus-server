@@ -98,6 +98,8 @@ jobs:
 
       - name: Test deployment Compose wrapper
         run: python3 deploy/test-compose-wrapper.py
+      - name: Test cumulative release notes
+        run: python3 deploy/test-release-notes.py
 
       - name: Test local TURN installation, permissions and authenticated relay traffic
         run: python3 deploy/test-local-turn.py

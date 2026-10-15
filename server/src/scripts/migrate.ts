@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Client } from 'pg';
 import { shouldAdoptPublicInitialSchema } from './migrationBaselinePolicy';
+import { appliedMigrationChecksumMatch } from './migrationChecksumPolicy';
 import { loadMigrationCliRuntimeConfig } from '../config/cliRuntimeConfig';
 
 type MigrationFile = {
@@ -158,11 +159,15 @@ async function main(): Promise<void> {
     for (const migration of migrations) {
       const appliedChecksum = applied.get(migration.version);
       if (appliedChecksum) {
-        if (appliedChecksum !== migration.checksum) {
+        const checksumMatch = appliedMigrationChecksumMatch(migration.version, appliedChecksum, migration.checksum);
+        if (!checksumMatch) {
           throw new Error(
             `Migration ${migration.version} was already applied with checksum ${appliedChecksum}, ` +
             `but the file now has checksum ${migration.checksum}. Published migrations must not be edited.`
           );
+        }
+        if (checksumMatch === 'known_comment_only_change') {
+          console.warn(`KNOWN_COMMENT_ONLY_MIGRATION_CHECKSUM: ${migration.version}; original recorded checksum retained, SQL not rerun`);
         }
         console.log(`Skipping ${migration.version} (already applied)`);
         skippedCount += 1;

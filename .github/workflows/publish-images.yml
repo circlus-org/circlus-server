@@ -68,46 +68,6 @@ jobs:
             echo "Release $TAG already exists; leaving it unchanged."
             exit 0
           fi
-          # Database changes are listed from the repository, not written by hand. They are
-          # counted from the last published release: candidate tags without a release do
-          # not reach servers, so their migrations are new for every owner.
-          PREVIOUS_TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
-          if [ -n "$PREVIOUS_TAG" ]; then
-            MIGRATIONS="$(git diff --name-only --diff-filter=A "$PREVIOUS_TAG" "$TAG" -- server/db/migrations \
-              | grep -E '\.sql$' | xargs -r -n1 basename | sed 's/^/- `/; s/$/`/')"
-            SINCE="since $PREVIOUS_TAG"
-          else
-            MIGRATIONS=""
-            SINCE=""
-          fi
-          if [ -n "$MIGRATIONS" ]; then
-            DATABASE="New migrations $SINCE run automatically during the update:
-
-          $MIGRATIONS
-
-          After them, the previous version may not start on this database. To go back, restore the backup made before updating."
-          elif [ -n "$PREVIOUS_TAG" ]; then
-            DATABASE="No database changes $SINCE."
-          else
-            DATABASE="First release: the database is created during installation."
-          fi
-          cat > notes.md <<NOTES
-          ## Changes
-
-          <!-- Publisher: what changed for server owners and their users; mark security fixes. Comments are not shown on the release page. -->
-
-          <!-- Publisher: add "## Before updating" only if the update needs more than the README "Updating" steps: a new setting or secret, a configuration change, app versions that stop working with this server (CLIENT_SERVER_COMPATIBILITY.md). -->
-
-          ## Database
-
-          $DATABASE
-
-          ## Images
-
-          - \`$SERVER_IMAGE\`
-          - \`$ICE_IMAGE\`
-
-          Install or update by following the README with \`CIRCLUS_IMAGE_TAG=$TAG\`.
-          NOTES
+          python3 deploy/generate-release-notes.py --repo "$GITHUB_REPOSITORY" --tag "$TAG" > notes.md
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "$TAG" --notes-file notes.md

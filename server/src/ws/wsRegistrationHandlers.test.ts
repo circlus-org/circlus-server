@@ -224,7 +224,7 @@ describe('WebSocket registration handlers', () => {
       participants: ['identity-1', 'identity-2']
     });
     const { handlers, dependencies, callSessionRouting } = harness();
-    callSessionRouting.get.mockReturnValue({ targetIdentityId: 'identity-2' });
+    callSessionRouting.get.mockReturnValue({ familyId: 'family-1', targetIdentityId: 'identity-2', initiatorDeviceId: 'device-1' });
 
     await handlers.handleCallRuntime(ws, {
       signedRequest: {
@@ -261,6 +261,38 @@ describe('WebSocket registration handlers', () => {
       },
       timestamp: 1_000
     });
+  });
+
+  it.each([
+    { role: 'caller', state: 'ringing', owner: 'device-1', allowed: true, bind: true },
+    { role: 'caller', state: 'ringing', owner: 'other-device', allowed: false, bind: false },
+    { role: 'caller', state: 'ringing', owner: undefined, allowed: false, bind: false },
+    { role: 'callee', state: 'ringing', owner: undefined, allowed: true, bind: false },
+    { role: 'callee', state: 'active', owner: 'device-1', allowed: true, bind: true },
+    { role: 'callee', state: 'active', owner: 'other-device', allowed: false, bind: false },
+    { role: 'callee', state: 'active', owner: undefined, allowed: false, bind: false },
+    { role: 'caller', state: 'active', owner: 'other-device', purpose: 'terminal', allowed: true, bind: false },
+  ])('native ownership $role/$state/$owner/$purpose', async ({ role, state, owner, allowed, bind, ...rest }) => {
+    (query as jest.Mock).mockResolvedValue({ rows: [{ device_id: 'device-1', identity_id: 'identity-1', family_id: 'family-1', status: 'active', public_key_algorithm: 'ed25519', public_key_value: 'public' }] });
+    (verifySignedRequest as jest.Mock).mockReturnValue(true);
+    (identityRepository.findByIdentityId as jest.Mock).mockResolvedValue({ status: 'active' });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ initiator: role === 'caller' ? 'identity-1' : 'identity-2', participants: ['identity-1', 'identity-2'], state });
+    const { handlers, dependencies, callSessionRouting } = harness();
+    callSessionRouting.get.mockReturnValue({ familyId: 'family-1', targetIdentityId: role === 'callee' ? 'identity-1' : 'identity-2', initiatorDeviceId: role === 'caller' ? owner : 'caller-device', acceptedTargetDeviceId: role === 'callee' ? owner : undefined });
+    await handlers.handleCallRuntime(ws, { signedRequest: { type: 'call:runtime-register', signerId: 'device-1', vpsId: 'vps-test', circleId: 'circle-1', signature: 'signature', timestamp: 1000, nonce: 'native-purpose', payload: { callSessionId: 'call-1', remoteIdentityId: 'identity-2', role, mode: 'video-native', ...('purpose' in rest ? { purpose: rest.purpose } : {}) } } } as any);
+    if (allowed) expect(dependencies.sendMessage).toHaveBeenCalledWith(ws, expect.objectContaining({ type: 'registered' }));
+    else expect(dependencies.sendError).toHaveBeenCalledWith(ws, 'FORBIDDEN', expect.any(String));
+    expect(callSessionRouting.bindInitiatorRuntime.mock.calls.length + callSessionRouting.bindTargetRuntime.mock.calls.length).toBe(bind ? 1 : 0);
+  });
+
+  it.each([{ identityId: 'identity-other' }, { deviceId: 'device-other' }, { circleId: 'circle-other' }, { vpsId: 'vps-other' }])('rejects conflicting explicit native fields %p', async mismatch => {
+    (query as jest.Mock).mockResolvedValue({ rows: [{ device_id: 'device-1', identity_id: 'identity-1', family_id: 'family-1', status: 'active', public_key_algorithm: 'ed25519', public_key_value: 'public' }] });
+    (verifySignedRequest as jest.Mock).mockReturnValue(true);
+    const { handlers, dependencies } = harness();
+    await handlers.handleCallRuntime(ws, { signedRequest: { type: 'call:runtime-register', signerId: 'device-1', vpsId: 'vps-test', circleId: 'circle-1', signature: 'signature', timestamp: 1000, nonce: 'explicit-native', payload: { callSessionId: 'call-1', remoteIdentityId: 'identity-2', role: 'caller', mode: 'video-native', ...mismatch } } } as any);
+    expect(dependencies.registerConnection).not.toHaveBeenCalled();
+    expect(dependencies.sendError).toHaveBeenCalledWith(ws, 'FORBIDDEN', 'Call runtime route mismatch');
+    expect(dependencies.logCallDiag).toHaveBeenCalledWith('runtime_route_rejected', expect.objectContaining({ reason: 'CALL_ROUTE_FIELD_MISMATCH' }));
   });
 
   it('registers an admitted external identity without device routing', async () => {

@@ -410,10 +410,19 @@ describe('encrypted push delivery invariant', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(repositories.pushSubscriptionRepository.findActiveByDeviceId).not.toHaveBeenCalled();
   });
-  test('sends only an encrypted envelope for mobile bindings with an encryption key', async () => {
+  test.each(['incoming_call', 'call_status'])('expired limited-key authority suppresses %s without unbinding messages', async type => {
+    repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({ route: 'mobile_push', calls_enabled: true, call_readiness_expires_at: new Date(Date.now() - 1) });
+    const { sendPushToDevice } = await importPushModule();
+    expect(await sendPushToDevice('family_1', 'device_1' as any, { type, callSessionId: 'call_1' } as any, 'identity_1' as any,
+      'https://family.example.test', 'https://family.example.test', 'server_1', 'Family Server')).toMatchObject({ attempted: 0, skipped: 1 });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(repositories.mobileNotificationRepository.unbindToWebPush).not.toHaveBeenCalled();
+    expect(repositories.pushSubscriptionRepository.findActiveByDeviceId).not.toHaveBeenCalled();
+  });
+  test.each([{ calls_enabled: false }, { calls_enabled: true, call_readiness_expires_at: new Date(Date.now() - 1) }])('keeps encrypted message delivery with call policy %p', async policy => {
     repositories.mobileNotificationRepository.getActiveBindingByWebDeviceId.mockResolvedValue({
       route: 'mobile_push',
-      calls_enabled: false,
+      ...policy,
       mobile_endpoint_id: 'mobile_endpoint_1',
       mobile_endpoint_ref: null,
       web_device_id: 'device_1',

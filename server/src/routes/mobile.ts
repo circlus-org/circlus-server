@@ -24,6 +24,7 @@ import {
 } from '../ws/wsGateway';
 import type { IdentityId, WebSocketMessage } from '@shared/types';
 import { getRequestedCircleId, type TenancyRequest } from '../middleware/tenancy';
+import { getMobileCallIceServers } from '../services/mobileCallIce';
 import { configService } from '../services/configService';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 
@@ -100,7 +101,9 @@ router.get('/devices/bindings/status', async (req, res) => {
     webDeviceId: binding.web_device_id,
     mobileEndpointId: binding.mobile_endpoint_ref || binding.mobile_endpoint_id,
     boundWebOrigin: binding.bound_web_origin,
-    boundAt: binding.bound_at
+    boundAt: binding.bound_at,
+    callsEnabled: binding.calls_enabled !== false && (!binding.call_readiness_expires_at || binding.call_readiness_expires_at.getTime() > Date.now()),
+    callReadinessExpiresAt: binding.call_readiness_expires_at
   });
 });
 
@@ -112,6 +115,7 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
   pushEncryptionPublicKey: string;
   nativeMessagePreviewMode?: string;
   callsEnabled?: boolean;
+  callReadinessExpiresAt?: string;
 }>, res) => {
   const startedAt = Date.now();
   const familyId = req.familyId;
@@ -128,6 +132,7 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     pushEncryptionPublicKey?: string;
     nativeMessagePreviewMode?: string;
     callsEnabled?: boolean;
+    callReadinessExpiresAt?: string;
   };
   const mobileEndpointId = String(payload.mobileEndpointId || '').trim();
   const deliveryToken = String(payload.deliveryToken || '').trim();
@@ -137,6 +142,14 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     return res.status(400).json({ success: false, error: 'callsEnabled must be boolean' });
   }
   const callsEnabled = payload.callsEnabled !== false;
+  const readiness = payload.callReadinessExpiresAt;
+  const callReadinessExpiresAt = typeof readiness === 'string' ? new Date(readiness) : null;
+  if (readiness !== undefined && (typeof readiness !== 'string' || !callsEnabled
+    || !Number.isFinite(callReadinessExpiresAt?.getTime())
+    || callReadinessExpiresAt!.getTime() <= Date.now()
+    || callReadinessExpiresAt!.getTime() > Date.now() + 7 * 86400_000)) {
+    return res.status(400).json({ success: false, error: 'Invalid callReadinessExpiresAt' });
+  }
   const nativeMessagePreviewMode = normalizeNativeMessagePreviewMode(payload.nativeMessagePreviewMode);
   const deliveryTokenExpiresAt = deliveryTokenExpiresAtRaw
     ? new Date(deliveryTokenExpiresAtRaw)
@@ -182,7 +195,8 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     deliveryTokenExpiresAt,
     pushEncryptionPublicKey,
     nativeMessagePreviewMode,
-    callsEnabled
+    callsEnabled,
+    callReadinessExpiresAt
   });
 
   routeLogger.info('[FamilyServer][mobile:delivery-token:register] success', {
@@ -192,7 +206,8 @@ router.post('/devices/delivery-tokens/register', verifyDeviceSignature, requireA
     durationMs: Date.now() - startedAt,
   });
 
-  return res.json({ success: true, callsEnabled, mobilePushRoutePolicyVersion: 1 });
+  return res.json({ success: true, callsEnabled, mobilePushRoutePolicyVersion: 1,
+    ...(callReadinessExpiresAt ? { callReadinessExpiresAt: callReadinessExpiresAt.toISOString() } : {}) });
 }, req => 'mobile:'+req.device.deviceId));
 
 router.post('/calls/bootstrap', async (req, res) => {
@@ -235,8 +250,19 @@ router.post('/calls/bootstrap', async (req, res) => {
     return res.status(403).json({ success: false, error: 'Bootstrap identity is not active' });
   }
 
-  // Determine caller identity (the other participant)
-  const remoteIdentityId = callSession.participants.find((p: string) => p !== token.targetIdentityId) ?? '';
+  // Incoming-call bootstrap uses the stored explicit initiator, never the
+  // first/sole remaining participant as a routing fallback.
+  const remoteIdentityId = callSession.initiator;
+  if (!remoteIdentityId || remoteIdentityId === token.targetIdentityId
+    || callSession.participants.length !== 2 || new Set(callSession.participants).size !== 2
+    || !callSession.participants.includes(remoteIdentityId)
+    || (req.body?.remoteIdentityId !== undefined && req.body.remoteIdentityId !== remoteIdentityId)) {
+    routeLogger.warn('mobile_call_bootstrap_participants_invalid', {
+      operation: 'mobile_call_bootstrap', reason: 'CALL_PARTICIPANTS_INVALID',
+      candidateCount: callSession.participants.length
+    });
+    return res.status(403).json({ success: false, error: 'Invalid call participant route' });
+  }
   if (!requestedDeviceId) {
     return res.status(400).json({ success: false, error: 'Missing deviceId' });
   }
@@ -255,6 +281,10 @@ router.post('/calls/bootstrap', async (req, res) => {
       missingFields: [!publicBaseUrl && 'publicBaseUrl', !configuredCircleId && 'circleId'].filter(Boolean)
     });
     return res.status(500).json({ success: false, error: 'Call routing configuration is incomplete' });
+  }
+  if (configuredCircleId !== (req as TenancyRequest).circleId) {
+    routeLogger.warn('mobile_call_bootstrap_circle_mismatch', { operation: 'mobile_call_bootstrap', reason: 'CIRCLE_ID_MISMATCH' });
+    return res.status(403).json({ success: false, error: 'Circle configuration mismatch' });
   }
   let signalingUrl: string;
   try {
@@ -303,8 +333,21 @@ router.post('/calls/bootstrap', async (req, res) => {
     }
   }
 
+  // Locked iOS call path authenticates with the one-call bootstrap token, not
+  // a broadly usable device signing seed copied into background Keychain.
+  let callIceServers;
+  try {
+    callIceServers = await getMobileCallIceServers({ familyId, callSessionId });
+  } catch {
+    routeLogger.warn('mobile_call_bootstrap_ice_unavailable', {
+      operation: 'mobile_call_bootstrap', reason: 'CALL_ICE_CONFIG_UNAVAILABLE'
+    });
+    return res.status(503).json({ success: false, error: 'Call media configuration is unavailable' });
+  }
   return res.json({
     success: true,
+    callRuntimeProtocolVersion: 2,
+    iceServers: callIceServers,
     callSessionId,
     localIdentityId: token.targetIdentityId,
     deviceId: runtimeDeviceId,

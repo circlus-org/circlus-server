@@ -1,3 +1,4 @@
+import { deferCallSdpEffect } from '../services/callSdpEffects';
 import type { WebSocket } from 'ws';
 import type { CallSessionId, IdentityId } from '@shared/types';
 import { callHistoryRepository, callSessionRepository, identityRepository } from '../db/repositories';
@@ -141,13 +142,17 @@ export class CallAnswerWsHandler {
         return;
       }
 
+      if (info.actorType === 'local' && info.sdpRecoveryVersion === 1) {
+        await callSessionRepository.updateSdpAnswer(familyId, callSessionId, JSON.stringify(answer));
+      }
       await callSessionRepository.updateState(familyId, callSessionId, 'accepted');
       await callHistoryRepository.markAccepted({
         familyId,
         callSessionId,
         connectedAt: this.now()
       });
-      this.dependencies.callRingingService.stop(callSessionId);
+      const stopRinging = async () => { this.dependencies.callRingingService.stop(callSessionId); };
+      if (!deferCallSdpEffect(stopRinging)) await stopRinging();
 
       const targetBinding = this.dependencies.callSessionRouting.bindAcceptedTargetIfAbsent({
         callSessionId,
@@ -164,12 +169,19 @@ export class CallAnswerWsHandler {
           deviceId: info.deviceId,
           runtimeMode: info.actorType === 'local' ? info.runtimeMode || 'default' : undefined,
           acceptedTargetSocket: this.dependencies.describeSocket(ws),
-          initiatorSocket: this.dependencies.describeSocket(targetBinding.route.initiatorWs)
+          initiatorSocket: targetBinding.route.initiatorWs ? this.dependencies.describeSocket(targetBinding.route.initiatorWs) : undefined
         });
       } else if (
         targetBinding.status === 'already_bound'
         && targetBinding.route?.acceptedTargetWs
       ) {
+        if (targetBinding.route.acceptedTargetWs !== ws) {
+          // Two verified answers may have both read ringing before either DB
+          // update completed. Only the socket that actually won the binding may
+          // forward SDP or stop other devices; the loser never changes the peer.
+          this.dependencies.sendMessage(ws, { type: 'call:ended', data: { callSessionId, reason: 'answered_elsewhere' }, timestamp: this.now() });
+          return;
+        }
         this.dependencies.logCallDiag('answer_accepting_socket_already_bound', {
           callSessionId,
           familyId,
@@ -185,7 +197,8 @@ export class CallAnswerWsHandler {
       }
 
       this.stopRingingOnOtherSockets(ws, info, callSessionId);
-      void this.stopRingingPush(info, callSessionId, callSession.initiator as IdentityId);
+      const push = () => this.stopRingingPush(info, callSessionId, callSession.initiator as IdentityId);
+      if (!deferCallSdpEffect(push)) void push();
       this.dependencies.replayStoredIceCandidates({
         ws,
         callSessionId,
@@ -272,13 +285,13 @@ export class CallAnswerWsHandler {
     answer: any
   ): Promise<void> {
     const initiatorWs = this.dependencies.callSessionRouting.get(callSessionId)?.initiatorWs;
-    if (!initiatorWs) return;
+
     this.dependencies.logCallDiag('answer_forward_to_initiator', {
       callSessionId,
       familyId: info.familyId,
       fromIdentityId: info.identityId,
       fromDeviceId: info.deviceId,
-      initiatorSocket: this.dependencies.describeSocket(initiatorWs)
+      initiatorSocket: initiatorWs ? this.dependencies.describeSocket(initiatorWs) : undefined
     });
     const fromIdentity = await identityRepository.findByIdentityId(
       info.familyId,
@@ -290,7 +303,7 @@ export class CallAnswerWsHandler {
           value: fromIdentity.public_key_value
         }
       : undefined;
-    this.dependencies.sendMessage(initiatorWs, {
+    const message = {
       type: 'call:answered',
       data: {
         callSessionId,
@@ -299,6 +312,8 @@ export class CallAnswerWsHandler {
         answer
       },
       timestamp: this.now()
-    });
+    };
+    if (this.dependencies.deliverSdp?.(info, message)) return;
+    if (initiatorWs) this.dependencies.sendMessage(initiatorWs, message);
   }
 }

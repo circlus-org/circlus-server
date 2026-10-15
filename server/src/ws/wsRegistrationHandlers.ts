@@ -79,6 +79,7 @@ export type WsRegistrationHandlerDependencies = {
   >;
   describeSocket: (ws: WebSocket) => Record<string, string | undefined>;
   logCallDiag: (event: string, details: Record<string, unknown>) => void;
+  restoreCallRoute?: (familyId: string, callId: string) => Promise<void>;
   validateDirectFileRuntimeRegistration: (
     scope: DirectFileRuntimeRegistrationScope
   ) => boolean | Promise<boolean>;
@@ -295,6 +296,10 @@ export class WsRegistrationHandlers {
       const remoteIdentityId = String(payload?.remoteIdentityId || '').trim();
       const role = payload?.role === 'caller' || payload?.role === 'callee' ? payload.role : null;
       const mode = payload?.mode === 'video-native' ? payload.mode : null;
+      const purpose = payload?.purpose;
+      const sdpRecoveryVersion = (payload as any)?.sdpRecoveryVersion;
+      if (sdpRecoveryVersion !== undefined && sdpRecoveryVersion !== 1) { this.dependencies.sendError(ws, 'INVALID_STATE', 'Unsupported SDP recovery protocol'); return; }
+      if (purpose !== undefined && purpose !== 'terminal') { this.dependencies.sendError(ws, 'INVALID_STATE', 'Invalid runtime purpose'); return; }
       if (!callSessionId || !remoteIdentityId || !role || !mode) {
         this.dependencies.sendError(ws, 'INVALID_STATE', 'Invalid call runtime registration');
         return;
@@ -318,6 +323,15 @@ export class WsRegistrationHandlers {
 
 
       const { device, familyId, identityId } = actor;
+      const suppliedRoute = [
+        ['identityId', payload.identityId, identityId], ['deviceId', payload.deviceId, device.device_id],
+        ['circleId', payload.circleId, signedRequest.circleId], ['vpsId', payload.vpsId, signedRequest.vpsId]
+      ];
+      const mismatchedFields = suppliedRoute.filter(([, supplied, expected]) => supplied !== undefined && supplied !== expected).map(([field]) => field);
+      if (mismatchedFields.length) {
+        this.dependencies.logCallDiag('runtime_route_rejected', { operation: 'call.runtimeRegister', reason: 'CALL_ROUTE_FIELD_MISMATCH', mismatchedFields });
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'Call runtime route mismatch'); return;
+      }
       if (!familyId || !identityId) {
         this.dependencies.sendError(ws, 'INVALID_DEVICE', 'Device has no family_id');
         return;
@@ -348,13 +362,40 @@ export class WsRegistrationHandlers {
         return;
       }
 
+      if (callSession && (callSession.initiator === identityId) !== (role === 'caller')) {
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'Invalid call runtime role'); return;
+      }
+      if (callSession && !['ended', 'expired', 'failed'].includes(callSession.state)
+          && !this.dependencies.callSessionRouting.get(callSessionId as CallSessionId)) await this.dependencies.restoreCallRoute?.(familyId, callSessionId);
+      if (callSession && purpose !== 'terminal') {
+        if (['ended', 'expired', 'failed'].includes(callSession.state)) {
+          this.dependencies.sendError(ws, 'FORBIDDEN', 'Invalid call runtime state or role'); return;
+        }
+        const selected = this.dependencies.callSessionRouting.get(callSessionId as CallSessionId);
+        if (!selected || selected.familyId !== familyId) {
+          this.dependencies.logCallDiag('runtime_route_rejected', { operation: 'call.runtimeRegister', reason: selected ? 'CALL_ROUTE_CIRCLE_MISMATCH' : 'CALL_ROUTE_CONTEXT_REQUIRED', candidateCount: selected ? 1 : 0 });
+          this.dependencies.sendError(ws, 'FORBIDDEN', 'Call route context is unavailable'); return;
+        }
+        const isCaller = callSession.initiator === identityId;
+        if (isCaller || ['accepted', 'active'].includes(callSession.state)) {
+          const ownerDevice = isCaller ? selected.initiatorDeviceId : selected.acceptedTargetDeviceId;
+          if (!ownerDevice || ownerDevice !== device.device_id) {
+            this.dependencies.logCallDiag('runtime_route_rejected', { operation: 'call.runtimeRegister', reason: ownerDevice ? 'CALL_DEVICE_MISMATCH' : 'CALL_DEVICE_ID_REQUIRED', missingFields: ownerDevice ? [] : ['selectedDeviceId'] });
+            this.dependencies.sendError(ws, 'FORBIDDEN', 'Call runtime requires the selected device'); return;
+          }
+        }
+      }
       const info: LocalConnectionInfo = {
         actorType: 'local',
         identityId: identityId as IdentityId,
         deviceId: device.device_id as DeviceId,
         familyId,
         runtimeMode: mode,
-        scopedCallSessionId: callSessionId as CallSessionId
+        scopedCallSessionId: callSessionId as CallSessionId,
+        scopedRemoteIdentityId: remoteIdentityId as IdentityId,
+        callRuntimeRole: role,
+        ...(sdpRecoveryVersion === 1 ? { sdpRecoveryVersion: 1 as const } : {}),
+        ...(purpose === 'terminal' ? { callRuntimePurpose: 'terminal' as const } : {})
       };
       this.dependencies.registerConnection(ws, info, { trackDevice: true });
       await this.dependencies.touchConnectionLastSeen(ws, true);
@@ -371,7 +412,8 @@ export class WsRegistrationHandlers {
         identityId,
         deviceId: device.device_id,
         callSessionId,
-        runtimeMode: mode
+        runtimeMode: mode,
+        ...(purpose === 'terminal' ? { purpose: 'terminal' } : {})
       });
       this.logger.info('ws_call_runtime_registration_completed', {
         familyId,
@@ -764,10 +806,10 @@ export class WsRegistrationHandlers {
   private bindCallRuntimeSocket(
     ws: WebSocket,
     info: LocalConnectionInfo,
-    callSession: { initiator: string } | null
+    callSession: { initiator: string; state?: string } | null
   ): void {
     const callSessionId = info.scopedCallSessionId;
-    if (!callSessionId || !callSession || info.runtimeMode !== 'video-native') return;
+    if (!callSessionId || !callSession || info.runtimeMode !== 'video-native' || info.callRuntimePurpose === 'terminal') return;
     const route = this.dependencies.callSessionRouting.get(callSessionId);
     if (!route) return;
 
@@ -785,7 +827,7 @@ export class WsRegistrationHandlers {
         mode: info.runtimeMode,
         socket: this.dependencies.describeSocket(ws)
       });
-    } else if (route.targetIdentityId === info.identityId) {
+    } else if (route.targetIdentityId === info.identityId && ['accepted', 'active'].includes(callSession.state || '')) {
       this.dependencies.callSessionRouting.bindTargetRuntime({
         callSessionId,
         identityId: info.identityId,

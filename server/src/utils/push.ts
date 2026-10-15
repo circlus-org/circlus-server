@@ -160,7 +160,8 @@ export async function sendPushToDevice(
     const ttlSec = ttlSecondsForPayload(routedPayload);
     const activeBinding = await mobileNotificationRepository.getActiveBindingByWebDeviceId(familyId, deviceId);
     if (activeBinding && activeBinding.route === 'mobile_push') {
-      if (activeBinding.calls_enabled === false && (routedPayload.type === 'incoming_call' || routedPayload.type === 'call_status')) {
+      if ((activeBinding.calls_enabled === false || (activeBinding.call_readiness_expires_at != null && activeBinding.call_readiness_expires_at.getTime() <= Date.now()))
+        && (routedPayload.type === 'incoming_call' || routedPayload.type === 'call_status')) {
         summary.subscriptionsTotal = 1;
         summary.skipped = 1;
         return summary;

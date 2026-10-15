@@ -1640,6 +1640,8 @@ export type WSMessageType =
   | 'call:heartbeat'
   | 'call:resume'
   | 'call:resumed'
+  | 'call:ice-config'
+  | 'call:ice-configured'
   | 'call:finalized'
   | 'call:cancel'
   | 'call:decline'
@@ -2155,6 +2157,13 @@ export type WSRegisterCallRuntimeData = {
     remoteIdentityId: IdentityId;
     role: 'caller' | 'callee';
     mode: 'video-native';
+    /** Opt-in idempotent SDP admission and recipient application ACK. */
+    sdpRecoveryVersion?: 1;
+    /** Scoped terminal intent only; cannot bind or resume media. */
+    purpose?: 'terminal';
+    deviceId?: DeviceId;
+    vpsId?: string;
+    circleId?: string;
     callKeyDelegation?: {
       payload?: string;
       signature?: string;

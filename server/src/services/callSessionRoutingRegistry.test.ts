@@ -169,3 +169,11 @@ describe('CallSessionRoutingRegistry', () => {
     });
   });
 });
+
+it('never overwrites another Circle, identity or device on a colliding explicit call ID', () => {
+  const registry = createRegistry(), original = registry.get('call-1');
+  for (const override of [{ familyId: 'family-2' }, { initiatorIdentityId: 'other' }, { initiatorDeviceId: 'other-device' }, { targetIdentityId: 'other-target' }]) {
+    expect(() => registry.registerInitiator({ callSessionId: 'call-1', familyId: 'family-1', initiatorIdentityId: 'caller', initiatorDeviceId: 'caller-device', targetIdentityId: 'recipient', initiatorWs, ...override })).toThrow('CALL_ROUTE_AUTHORITY_MISMATCH');
+    expect(registry.get('call-1')).toEqual(original);
+  }
+});

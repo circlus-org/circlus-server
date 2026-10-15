@@ -1,10 +1,11 @@
 import type { WebSocket } from 'ws';
+import { getRequestLogger } from '../middleware/requestContext';
 import type { CallSessionId, DeviceId, IdentityId } from '@shared/types';
 
 export type CallSessionRoute = Readonly<{
   familyId: string;
   initiatorIdentityId: IdentityId;
-  initiatorWs: WebSocket;
+  initiatorWs?: WebSocket;
   initiatorDeviceId?: DeviceId;
   targetIdentityId: IdentityId;
   acceptedTargetWs?: WebSocket;
@@ -41,6 +42,22 @@ export class CallSessionRoutingRegistry {
 
   private readonly routes = new Map<CallSessionId, MutableCallSessionRoute>();
 
+  /** A durable route has authority but no fabricated live sockets. */
+  restore(callSessionId: CallSessionId, route: Omit<CallSessionRoute, 'initiatorWs' | 'acceptedTargetWs'>): CallSessionRoute {
+    const previous = this.routes.get(callSessionId);
+    if (!route.familyId || !route.initiatorIdentityId || !route.initiatorDeviceId || !route.targetIdentityId
+        || route.initiatorIdentityId === route.targetIdentityId
+        || (previous && (previous.familyId !== route.familyId || previous.initiatorIdentityId !== route.initiatorIdentityId
+          || previous.initiatorDeviceId !== route.initiatorDeviceId || previous.targetIdentityId !== route.targetIdentityId
+          || previous.acceptedTargetDeviceId !== route.acceptedTargetDeviceId))) {
+      getRequestLogger({ subsystem: 'call-routing' }).warn('call_route_rejected', { operation: 'call.routeRestore', reason: 'CALL_DURABLE_ROUTE_CONFLICT',
+        candidateCount: previous ? 1 : 0, missingFields: ['familyId', 'initiatorIdentityId', 'initiatorDeviceId', 'targetIdentityId'].filter(field => !(route as any)[field]) });
+      throw new Error('CALL_DURABLE_ROUTE_CONFLICT');
+    }
+    if (previous) return snapshot(previous);
+    this.routes.set(callSessionId, { ...route }); return { ...route };
+  }
+
   registerInitiator(params: {
     callSessionId: CallSessionId;
     familyId: string;
@@ -49,7 +66,14 @@ export class CallSessionRoutingRegistry {
     initiatorDeviceId?: DeviceId;
     targetIdentityId: IdentityId;
   }): CallSessionRoute {
+    const previous = this.routes.get(params.callSessionId);
+    if (previous && (previous.familyId !== params.familyId || previous.initiatorIdentityId !== params.initiatorIdentityId
+      || previous.targetIdentityId !== params.targetIdentityId || previous.initiatorDeviceId !== params.initiatorDeviceId)) {
+      getRequestLogger({ subsystem: 'call-routing' }).warn('call_route_rejected', { operation: 'call.routeRegister', reason: 'CALL_ROUTE_AUTHORITY_MISMATCH', candidateCount: 1 });
+      throw new Error('CALL_ROUTE_AUTHORITY_MISMATCH');
+    }
     const route: MutableCallSessionRoute = {
+      ...previous,
       familyId: params.familyId,
       initiatorIdentityId: params.initiatorIdentityId,
       initiatorWs: params.initiatorWs,
@@ -116,7 +140,7 @@ export class CallSessionRoutingRegistry {
     if (route.targetIdentityId !== params.identityId) {
       return { status: 'identity_mismatch', route: snapshot(route) };
     }
-    if (route.acceptedTargetWs) {
+    if (route.acceptedTargetWs || (route.acceptedTargetDeviceId && route.acceptedTargetDeviceId !== params.deviceId)) {
       return { status: 'already_bound', route: snapshot(route) };
     }
     route.acceptedTargetWs = params.ws;

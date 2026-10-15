@@ -111,6 +111,7 @@ function harness(overrides: Partial<CallSignalingWsHandlerDependencies> = {}) {
     stop: jest.fn()
   };
   const dependencies: CallSignalingWsHandlerDependencies = {
+    prepareOffer: jest.fn(async (_scope, create) => { await create(); return true; }),
     getConnectionInfo: (ws) => connectionInfo.get(ws),
     getWebIncomingCallSockets: jest.fn(() => new Set([calleeWs])),
     getGeneralIdentitySockets: jest.fn(() => new Set([calleeWs, otherDeviceWs])),
@@ -130,7 +131,6 @@ function harness(overrides: Partial<CallSignalingWsHandlerDependencies> = {}) {
     logCallDiag: jest.fn(),
     logger: logger as any,
     now: () => 1_000,
-    createCallSessionId: () => 'call-generated',
     ...overrides
   };
   return {
@@ -210,6 +210,32 @@ describe('call signaling WebSocket handlers', () => {
       'call_incoming_delivered_via_ws',
       expect.objectContaining({ callSessionId: 'call-1', socketCount: 1 })
     );
+  });
+
+  it('rejects a durable pre-offer cancellation before history, routing, ringing or push', async () => {
+    const { handlers, dependencies, callRingingService, callSessionRouting } = harness({ prepareOffer: jest.fn(async () => false) });
+    await handlers.handleOffer(callerWs, { targetIdentityId: calleeIdentityId, callSessionId: 'call-cancelled', offer: { type: 'offer', sdp: 'v=0' } });
+    expect(callSessionRepository.create).not.toHaveBeenCalled();
+    expect(callHistoryRepository.ensureCreated).not.toHaveBeenCalled();
+    expect(callSessionRouting.registerInitiator).not.toHaveBeenCalled();
+    expect(callRingingService.scheduleExpiry).not.toHaveBeenCalled();
+    expect(callRingingService.deliverInitialPush).not.toHaveBeenCalled();
+    expect(dependencies.sendToConnectionSet).not.toHaveBeenCalled();
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(callerWs, expect.objectContaining({ type: 'call:ended', data: { callSessionId: 'call-cancelled', reason: 'cancelled' } }));
+  });
+  it('rejects an absent call ID without assigning a replacement', async () => {
+    const { handlers, dependencies } = harness();
+    await handlers.handleOffer(callerWs, { targetIdentityId: calleeIdentityId, offer: { type: 'offer' } });
+    expect(dependencies.prepareOffer).not.toHaveBeenCalled(); expect(callSessionRepository.create).not.toHaveBeenCalled();
+    expect(dependencies.logCallDiag).toHaveBeenCalledWith('call_offer_route_rejected', expect.objectContaining({ reason: 'CALL_ROUTE_INCOMPLETE', missingFields: ['callSessionId'] }));
+  });
+  it.each(['call', 'peer', 'role'])('rejects a native offer with mismatched registered %s', async field => {
+    const { handlers, dependencies } = harness({ getConnectionInfo: () => ({ ...callerInfo, actorType: 'local', runtimeMode: 'video-native',
+      scopedCallSessionId: field === 'call' ? 'other-call' : 'call-1', scopedRemoteIdentityId: field === 'peer' ? callerIdentityId : calleeIdentityId,
+      callRuntimeRole: field === 'role' ? 'callee' : 'caller' }) });
+    await handlers.handleOffer(callerWs, { callSessionId: 'call-1', targetIdentityId: calleeIdentityId, offer: { type: 'offer' } });
+    expect(dependencies.prepareOffer).not.toHaveBeenCalled(); expect(callSessionRepository.create).not.toHaveBeenCalled();
+    expect(dependencies.logCallDiag).toHaveBeenCalledWith('call_offer_route_rejected', expect.objectContaining({ reason: 'CALL_RUNTIME_ROUTE_MISMATCH' }));
   });
 
   it.each([60_000, 1_000, 999])('checks expiry %i again after guest registration before delivering a call', async (expiresAt) => {
@@ -450,6 +476,17 @@ describe('call signaling WebSocket handlers', () => {
     );
   });
 
+  it('does not forward a racing answer after another device won the route binding', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state: 'ringing', created_at: new Date(500), ice_candidates: [] });
+    const { handlers, dependencies, callSessionRouting } = harness();
+    callSessionRouting.get.mockReturnValue({ initiatorWs: callerWs });
+    callSessionRouting.bindAcceptedTargetIfAbsent.mockReturnValue({ status: 'already_bound', route: { initiatorWs: callerWs, acceptedTargetWs: otherDeviceWs, acceptedTargetDeviceId: 'other-device' } });
+    await handlers.handleAnswer(calleeWs, { callSessionId: 'call-1', answer: { type: 'answer', sdp: 'v=0' } });
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(calleeWs, expect.objectContaining({ type: 'call:ended', data: { callSessionId: 'call-1', reason: 'answered_elsewhere' } }));
+    expect(dependencies.sendMessage).not.toHaveBeenCalledWith(callerWs, expect.objectContaining({ type: 'call:answered' }));
+    expect(sendCallStatusPush).not.toHaveBeenCalled();
+  });
+
   it('forwards the answer while the stop-ringing push is still pending', async () => {
     let releasePush!: () => void;
     (sendCallStatusPush as jest.Mock).mockReturnValue(new Promise<void>(resolve => { releasePush = resolve; }));
@@ -585,6 +622,119 @@ describe('call signaling WebSocket handlers', () => {
       type: 'call:video-state',
       data: { callSessionId: 'call-1', enabled: true, source, requestReply: true },
       timestamp: 1_000
+    });
+  });
+
+  describe('delegated native media endpoint authority', () => {
+    const nativeCaller: ConnectionInfo = { ...callerInfo, runtimeMode: 'video-native',
+      scopedCallSessionId: 'call-1', scopedRemoteIdentityId: calleeIdentityId, callRuntimeRole: 'caller' };
+    const route = { familyId: 'family-1', initiatorIdentityId: callerIdentityId, initiatorDeviceId: 'caller-device',
+      initiatorWs: callerWs, targetIdentityId: calleeIdentityId, acceptedTargetDeviceId: 'callee-device', acceptedTargetWs: calleeWs };
+    const call = { participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state: 'active' };
+    const operations = [
+      ['handleRenegotiateOffer', { offer: { type: 'offer', sdp: 'private-sdp' } }],
+      ['handleRenegotiateAnswer', { answer: { type: 'answer', sdp: 'private-sdp' } }],
+      ['handleIceCandidate', { candidate: { candidate: 'private-candidate' } }],
+      ['handleVideoState', { enabled: true }]
+    ] as const;
+    const invalid = [
+      ['missing peer', { scopedRemoteIdentityId: undefined }, {}, 'call-1', 'CALL_MEDIA_SCOPE_REQUIRED'],
+      ['missing call', { scopedCallSessionId: undefined }, {}, 'call-1', 'CALL_MEDIA_SCOPE_REQUIRED'],
+      ['missing role', { callRuntimeRole: undefined }, {}, 'call-1', 'CALL_MEDIA_SCOPE_REQUIRED'],
+      ['wrong call', {}, {}, 'call-2', 'CALL_MEDIA_SCOPE_MISMATCH'],
+      ['other Circle on same origin', {}, { familyId: 'family-2' }, 'call-1', 'CALL_MEDIA_ROUTE_MISMATCH'],
+      ['wrong peer', { scopedRemoteIdentityId: 'third-identity' }, {}, 'call-1', 'CALL_MEDIA_ROUTE_MISMATCH'],
+      ['wrong role', { callRuntimeRole: 'callee' }, {}, 'call-1', 'CALL_MEDIA_PEER_MISMATCH'],
+      ['sibling device', { deviceId: 'sibling-device' }, {}, 'call-1', 'CALL_MEDIA_ENDPOINT_MISMATCH'],
+      ['replaced socket on same device', {}, { initiatorWs: otherDeviceWs }, 'call-1', 'CALL_MEDIA_ENDPOINT_MISMATCH'],
+      ['unknown selected device', {}, { initiatorDeviceId: undefined }, 'call-1', 'CALL_MEDIA_DEVICE_REQUIRED']
+    ] as const;
+    for (const [method, fields] of operations) {
+      it.each(invalid)(`${method} rejects %s before persistence or forwarding`, async (_label, infoChange, routeChange, id, reason) => {
+        const info = { ...nativeCaller, ...infoChange } as ConnectionInfo;
+        const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => info });
+        callSessionRouting.get.mockReturnValue({ ...route, ...routeChange });
+        callSessionRouting.resolvePeerSocket.mockReturnValue(calleeWs);
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(call);
+        await (handlers[method] as any)(callerWs, { callSessionId: id, ...fields });
+        expect(dependencies.sendError).toHaveBeenCalledWith(callerWs, 'FORBIDDEN', reason);
+        expect(callSessionRepository.updateSdpOffer).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpAnswer).not.toHaveBeenCalled();
+        expect(callSessionRepository.addIceCandidate).not.toHaveBeenCalled();
+        expect(dependencies.sendMessage).not.toHaveBeenCalled();
+        expect(dependencies.sendToConnectionSet).not.toHaveBeenCalled();
+        expect(JSON.stringify((dependencies.logCallDiag as jest.Mock).mock.calls)).not.toMatch(/private-sdp|private-candidate/);
+      });
+      it(`${method} accepts only the selected native endpoint`, async () => {
+        const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => nativeCaller });
+        callSessionRouting.get.mockReturnValue(route); callSessionRouting.resolvePeerSocket.mockReturnValue(calleeWs);
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(call);
+        await (handlers[method] as any)(callerWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).not.toHaveBeenCalled();
+        expect(dependencies.sendMessage).toHaveBeenCalledWith(calleeWs, expect.anything());
+        expect(dependencies.sendToConnectionSet).not.toHaveBeenCalled();
+      });
+      it(`${method} accepts the selected callee and rejects its sibling device`, async () => {
+        const nativeCallee: ConnectionInfo = { ...calleeInfo, runtimeMode: 'video-native', scopedCallSessionId: 'call-1',
+          scopedRemoteIdentityId: callerIdentityId, callRuntimeRole: 'callee' };
+        const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => nativeCallee });
+        callSessionRouting.get.mockReturnValue(route); callSessionRouting.resolvePeerSocket.mockReturnValue(callerWs);
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(call);
+        await (handlers[method] as any)(calleeWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).not.toHaveBeenCalled();
+        expect(dependencies.sendMessage).toHaveBeenCalledWith(callerWs, expect.anything());
+        jest.clearAllMocks();
+        callSessionRouting.get.mockReturnValue({ ...route, acceptedTargetDeviceId: 'other-device' });
+        await (handlers[method] as any)(calleeWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).toHaveBeenCalledWith(calleeWs, 'FORBIDDEN', 'CALL_MEDIA_ENDPOINT_MISMATCH');
+        expect(dependencies.sendMessage).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpOffer).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpAnswer).not.toHaveBeenCalled();
+        expect(callSessionRepository.addIceCandidate).not.toHaveBeenCalled();
+      });
+      it(`${method} rejects an absent or ambiguous route`, async () => {
+        const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => nativeCaller });
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(call);
+        await (handlers[method] as any)(callerWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).toHaveBeenCalledWith(callerWs, 'FORBIDDEN', 'CALL_MEDIA_ROUTE_REQUIRED');
+        jest.clearAllMocks(); callSessionRouting.get.mockReturnValue(route);
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ ...call, participants: [...call.participants, 'third-identity'] });
+        await (handlers[method] as any)(callerWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).toHaveBeenCalledWith(callerWs, 'FORBIDDEN', 'CALL_MEDIA_ROUTE_MISMATCH');
+        expect(dependencies.sendMessage).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpOffer).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpAnswer).not.toHaveBeenCalled();
+        expect(callSessionRepository.addIceCandidate).not.toHaveBeenCalled();
+      });
+      it(`${method} rejects authentication replacement during the call lookup`, async () => {
+        let info: ConnectionInfo = nativeCaller;
+        const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => info });
+        callSessionRouting.get.mockReturnValue(route); callSessionRouting.resolvePeerSocket.mockReturnValue(calleeWs);
+        (callSessionRepository.findByCallSessionId as jest.Mock).mockImplementation(async () => { info = { ...nativeCaller }; return call; });
+        await (handlers[method] as any)(callerWs, { callSessionId: 'call-1', ...fields });
+        expect(dependencies.sendError).toHaveBeenCalledWith(callerWs, 'FORBIDDEN', 'CALL_MEDIA_AUTHORITY_CHANGED');
+        expect(dependencies.sendMessage).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpOffer).not.toHaveBeenCalled();
+        expect(callSessionRepository.updateSdpAnswer).not.toHaveBeenCalled();
+        expect(callSessionRepository.addIceCandidate).not.toHaveBeenCalled();
+      });
+    }
+    it('stores initial caller ICE without broadcasting to unselected devices', async () => {
+      const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => nativeCaller });
+      callSessionRouting.get.mockReturnValue({ ...route, acceptedTargetWs: undefined, acceptedTargetDeviceId: undefined });
+      (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ ...call, state: 'ringing' });
+      await handlers.handleIceCandidate(callerWs, { callSessionId: 'call-1', candidate: { candidate: 'candidate:initial' } });
+      expect(callSessionRepository.addIceCandidate).toHaveBeenCalled();
+      expect(dependencies.sendToConnectionSet).not.toHaveBeenCalled();
+      expect(dependencies.sendError).not.toHaveBeenCalled();
+    });
+    it('does not persist a native renegotiation without a selected peer', async () => {
+      const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => nativeCaller });
+      callSessionRouting.get.mockReturnValue(route);
+      (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(call);
+      await handlers.handleRenegotiateOffer(callerWs, { callSessionId: 'call-1', offer: {} });
+      expect(dependencies.sendError).toHaveBeenCalledWith(callerWs, 'FORBIDDEN', 'CALL_MEDIA_PEER_REQUIRED');
+      expect(callSessionRepository.updateSdpOffer).not.toHaveBeenCalled();
     });
   });
 

@@ -62,7 +62,7 @@ export class CallSignalingRecovery {
 
   resume(ws: WebSocket, info: ConnectionInfo, callSessionId: string): boolean {
     if (info.actorType === 'local' && (
-      info.runtimeMode === 'direct-file-native'
+      info.callRuntimePurpose === 'terminal' || info.runtimeMode === 'direct-file-native'
       || (info.scopedCallSessionId && info.scopedCallSessionId !== callSessionId)
     )) return false;
     const pending = [...this.pending].find(p => p.callSessionId === callSessionId

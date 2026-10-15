@@ -1,6 +1,5 @@
-import { nanoid } from 'nanoid';
 import type { WebSocket } from 'ws';
-import type { CallSessionId, WSCallVideoStateData } from '@shared/types';
+import type { WSCallVideoStateData } from '@shared/types';
 import { serverLogger } from '../utils/logger';
 import { CallOfferWsHandler } from './callOfferWsHandler';
 import { CallAnswerWsHandler } from './callAnswerWsHandler';
@@ -20,8 +19,6 @@ export class CallSignalingWsHandlers {
   constructor(dependencies: CallSignalingWsHandlerDependencies) {
     const runtime: CallSignalingWsHandlerRuntime = {
       now: dependencies.now || Date.now,
-      createCallSessionId: dependencies.createCallSessionId
-        || (() => `call_${nanoid()}` as CallSessionId),
       logger: dependencies.logger || serverLogger.child({ subsystem: 'call_signaling' })
     };
     this.offerHandlers = new CallOfferWsHandler(dependencies, runtime);

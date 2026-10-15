@@ -1,8 +1,9 @@
 import type { WebSocket } from 'ws';
-import type { IdentityId, WebSocketMessage, WSCallVideoStateData } from '@shared/types';
+import type { CallSessionId, IdentityId, WebSocketMessage, WSCallVideoStateData } from '@shared/types';
 import { callSessionRepository, identityRepository } from '../db/repositories';
 import { recordCallIceCandidate } from './callIceDiagnostics';
 import type { ConnectionInfo } from './wsConnectionContext';
+import { nativeCallMediaAuthority } from './nativeCallMediaAuthority';
 import type {
   CallSignalingWsHandlerDependencies,
   CallSignalingWsHandlerRuntime
@@ -72,6 +73,7 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
+      if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, 'call.iceCandidate')) return;
       const recorded = recordCallIceCandidate({
         callSessionId,
         identityId: info.identityId,
@@ -81,6 +83,7 @@ export class CallPeerMediaWsHandlers {
         from: info.identityId,
         candidate
       });
+      if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, 'call.iceCandidate')) return;
       if (
         this.dependencies.iceDiagnostics
         && (recorded.entry.total <= 2 || recorded.entry.total % 10 === 0)
@@ -103,9 +106,9 @@ export class CallPeerMediaWsHandlers {
         });
       }
 
-      const otherParticipant = callSession.participants.find(
-        (participant: string) => participant !== info.identityId
-      ) as IdentityId | undefined;
+      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+        ? info.scopedRemoteIdentityId
+        : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
       const route = this.dependencies.callSessionRouting.get(callSessionId);
       if (route?.acceptedTargetWs) {
@@ -122,6 +125,7 @@ export class CallPeerMediaWsHandlers {
           return;
         }
       }
+      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
       this.dependencies.sendToConnectionSet(
         this.dependencies.getIdentitySockets(info.familyId, otherParticipant),
         {
@@ -184,9 +188,10 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
-      const otherParticipant = callSession.participants.find(
-        (participant: string) => participant !== info.identityId
-      ) as IdentityId | undefined;
+      if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, 'call.videoState')) return;
+      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+        ? info.scopedRemoteIdentityId
+        : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
       this.dependencies.logCallDiag('video_state_received', {
         callSessionId,
@@ -222,6 +227,7 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
+      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
       const otherSockets = this.dependencies.getIdentitySockets(
         info.familyId,
         otherParticipant
@@ -300,6 +306,14 @@ export class CallPeerMediaWsHandlers {
         return;
       }
       if (isTerminalCallState(callSession.state)) return;
+      if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, `call.renegotiate-${kind}`)) return;
+      // A native renegotiation requires a selected peer, never identity fanout.
+      if (info.actorType === 'local' && info.runtimeMode === 'video-native'
+          && !this.dependencies.callSessionRouting.resolvePeerSocket(callSessionId, info.identityId)
+          && !this.dependencies.hasDurableSdpPeer?.(info, callSessionId)) {
+        this.dependencies.logCallDiag('media_route_rejected', { operation: `call.renegotiate-${kind}`, reason: 'CALL_MEDIA_PEER_REQUIRED' });
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'CALL_MEDIA_PEER_REQUIRED'); return;
+      }
 
       try {
         if (kind === 'offer') {
@@ -319,11 +333,12 @@ export class CallPeerMediaWsHandlers {
         // Persistence is best-effort for mid-call renegotiation.
       }
 
-      const otherParticipant = callSession.participants.find(
-        (participant: string) => participant !== info.identityId
-      ) as IdentityId | undefined;
+      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+        ? info.scopedRemoteIdentityId
+        : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
       const senderMetadata = await this.resolveSenderMetadata(info);
+      if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, `call.renegotiate-${kind}`)) return;
       const message: WebSocketMessage = {
         type: messageType,
         data: {
@@ -333,6 +348,7 @@ export class CallPeerMediaWsHandlers {
         },
         timestamp: this.now()
       };
+      if (this.dependencies.deliverSdp?.(info, message)) return;
       const route = this.dependencies.callSessionRouting.get(callSessionId);
       const directPeerWs = this.dependencies.callSessionRouting.resolvePeerSocket(
         callSessionId,
@@ -358,6 +374,7 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
+      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
       const otherSockets = this.dependencies.getIdentitySockets(
         info.familyId,
         otherParticipant
@@ -383,6 +400,17 @@ export class CallPeerMediaWsHandlers {
         `Failed to handle renegotiation ${kind}`
       );
     }
+  }
+
+  private authorizeNativeMedia(ws: WebSocket, info: ConnectionInfo, callSessionId: string,
+    call: { initiator: string; participants: string[] }, operation: string): boolean {
+    const reason = nativeCallMediaAuthority({ ws, info, currentInfo: this.dependencies.getConnectionInfo(ws),
+      callSessionId, call, route: this.dependencies.callSessionRouting.get(callSessionId as CallSessionId) });
+    if (!reason) return true;
+    this.dependencies.logCallDiag('media_route_rejected', { operation, reason,
+      ...(reason === 'CALL_MEDIA_SCOPE_REQUIRED' ? { missingFields: ['scopedCallSessionId', 'scopedRemoteIdentityId', 'deviceId', 'callRuntimeRole'].filter(field => !(info as any)[field]) } : {}) });
+    this.dependencies.sendError(ws, 'FORBIDDEN', reason);
+    return false;
   }
 
   private async resolveSenderMetadata(info: ConnectionInfo): Promise<{

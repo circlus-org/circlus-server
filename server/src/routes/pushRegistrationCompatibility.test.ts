@@ -56,6 +56,20 @@ describe('temporary push registration compatibility', () => {
     expect((await invoke(cases[0], { payload: { ...cases[0].payload, callsEnabled: 'false' } })).statusCode).toBe(400);
     expect(mobileNotificationRepository.upsertDirectMobileRoute).not.toHaveBeenCalled();
   });
+  test('persists bounded call expiry independently of message expiry', async () => {
+    const expiry = new Date(Date.now() + 60_000);
+    const response = await invoke(cases[0], { payload: { ...cases[0].payload, callsEnabled: true, callReadinessExpiresAt: expiry.toISOString() } });
+    expect(response.body.callReadinessExpiresAt).toBe(expiry.toISOString());
+    expect(mobileNotificationRepository.upsertDirectMobileRoute).toHaveBeenCalledWith(expect.objectContaining({ callsEnabled: true, callReadinessExpiresAt: expiry, deliveryTokenExpiresAt: null }));
+  });
+  test.each([null, 123, {}, 'invalid', new Date(Date.now() - 1000).toISOString(), new Date(Date.now() + 8 * 86400_000).toISOString()])('rejects invalid call expiry %p before mutation', async expiry => {
+    expect((await invoke(cases[0], { payload: { ...cases[0].payload, callReadinessExpiresAt: expiry } })).statusCode).toBe(400);
+    expect(mobileNotificationRepository.upsertDirectMobileRoute).not.toHaveBeenCalled();
+  });
+  test('no-call policy cannot advertise a future call authority', async () => {
+    expect((await invoke(cases[0], { payload: { ...cases[0].payload, callsEnabled: false, callReadinessExpiresAt: new Date(Date.now() + 1000).toISOString() } })).statusCode).toBe(400);
+    expect(mobileNotificationRepository.upsertDirectMobileRoute).not.toHaveBeenCalled();
+  });
   test('authentication precedes the mobile compatibility adapter', () => {
     expect(mobileRoute.stack[0].handle).toBe(verifySignature);
     expect(mobileRoute.stack[1].handle).toBe(requireActiveIdentity);

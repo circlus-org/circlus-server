@@ -10,3 +10,7 @@ ice_config_service/secrets/
 .git
 .gitignore
 backups/
+
+# Native build products are never inputs to the server or web images.
+**/DerivedData
+**/*.xcresult

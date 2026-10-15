@@ -1,3 +1,4 @@
+import { deferCallSdpEffect } from '../services/callSdpEffects';
 import type { WebSocket } from 'ws';
 import type { CallSessionId, IdentityId } from '@shared/types';
 import type {
@@ -21,7 +22,6 @@ import type {
 
 export class CallOfferWsHandler {
   private readonly now: () => number;
-  private readonly createCallSessionId: () => CallSessionId;
   private readonly logger: CallSignalingWsHandlerRuntime['logger'];
 
   constructor(
@@ -29,7 +29,6 @@ export class CallOfferWsHandler {
     runtime: CallSignalingWsHandlerRuntime
   ) {
     this.now = runtime.now;
-    this.createCallSessionId = runtime.createCallSessionId;
     this.logger = runtime.logger;
   }
   async handleOffer(ws: WebSocket, data: any): Promise<void> {
@@ -82,6 +81,14 @@ export class CallOfferWsHandler {
         return;
       }
       const resolvedTargetIdentityId = rawTargetIdentityId as IdentityId;
+      if (info.actorType === 'local' && info.runtimeMode === 'video-native'
+          && (info.scopedCallSessionId !== clientCallSessionId || info.scopedRemoteIdentityId !== resolvedTargetIdentityId
+            || info.callRuntimeRole !== 'caller')) {
+        this.dependencies.logCallDiag('call_offer_route_rejected', {
+          operation: 'call.offer', reason: 'CALL_RUNTIME_ROUTE_MISMATCH'
+        });
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'Offer does not match the registered call route'); return;
+      }
 
       const targetIdentity = await identityRepository.findByIdentityId(
         familyId,
@@ -115,7 +122,13 @@ export class CallOfferWsHandler {
 
       if (!await this.assertCallAccess(ws, info, resolvedTargetIdentityId, String(clientCallSessionId || ''))) return;
 
-      const callSessionId = (clientCallSessionId || this.createCallSessionId()) as CallSessionId;
+      if (typeof clientCallSessionId !== 'string' || !clientCallSessionId.trim() || clientCallSessionId.length > 256) {
+        this.dependencies.logCallDiag('call_offer_route_rejected', {
+          operation: 'call.offer', reason: 'CALL_ROUTE_INCOMPLETE', missingFields: ['callSessionId']
+        });
+        this.dependencies.sendError(ws, 'VALIDATION_ERROR', 'Explicit callSessionId is required'); return;
+      }
+      const callSessionId = clientCallSessionId as CallSessionId;
       const supersedesCallSessionId = String(rawSupersedesCallSessionId || '').trim();
       let callCapabilityGrant: {
         descriptor: LinkCapabilityDescriptor;
@@ -188,13 +201,22 @@ export class CallOfferWsHandler {
         return;
       }
 
-      await callSessionRepository.create({
+      const created = await this.dependencies.prepareOffer({ familyId, callSessionId,
+        initiatorIdentityId: info.identityId, initiatorDeviceId: info.deviceId, targetIdentityId: resolvedTargetIdentityId
+      }, () => callSessionRepository.create({
         familyId,
         callSessionId,
         participants: [info.identityId, resolvedTargetIdentityId],
         initiator: info.identityId,
         state: 'new'
-      });
+      }));
+      if (!created) {
+        this.dependencies.logCallDiag('offer_rejected_after_durable_cancel', {
+          operation: 'call.offer', reason: 'CALL_CANCELLED_BEFORE_OFFER', callSessionId, familyId
+        });
+        this.dependencies.sendMessage(ws, { type: 'call:ended', data: { callSessionId, reason: 'cancelled' }, timestamp: this.now() });
+        return;
+      }
       const isTemporaryLinkCall = info.actorType === 'external'
         && info.callGrant?.kind === 'call_link';
       const callLinkTitle = isTemporaryLinkCall
@@ -257,16 +279,6 @@ export class CallOfferWsHandler {
         initiatorDeviceId: info.actorType === 'local' ? info.deviceId : undefined,
         targetIdentityId: resolvedTargetIdentityId
       });
-      ensureCallIceStats(callSessionId);
-      this.dependencies.callRingingService.scheduleExpiry({
-        callSessionId,
-        familyId,
-        initiatorIdentityId: info.identityId,
-        targetIdentityId: resolvedTargetIdentityId,
-        isTemporaryLinkCall,
-        callLinkTitle
-      });
-
       const targetSockets = await this.resolveEligibleTargetSockets(
         familyId,
         resolvedTargetIdentityId,
@@ -288,13 +300,25 @@ export class CallOfferWsHandler {
         });
       }
 
-      await this.deliverIncomingCallPush({
-        targetSockets,
-        callSessionId,
-        targetIdentityId: resolvedTargetIdentityId,
-        info,
-        isTemporaryLinkCall
-      });
+      const notify = async () => {
+        ensureCallIceStats(callSessionId);
+        this.dependencies.callRingingService.scheduleExpiry({
+          callSessionId,
+          familyId,
+          initiatorIdentityId: info.identityId,
+          targetIdentityId: resolvedTargetIdentityId,
+          isTemporaryLinkCall,
+          callLinkTitle
+        });
+        await this.deliverIncomingCallPush({
+          targetSockets,
+          callSessionId,
+          targetIdentityId: resolvedTargetIdentityId,
+          info,
+          isTemporaryLinkCall
+        });
+      };
+      if (!deferCallSdpEffect(notify)) await notify();
     } catch (error) {
       this.logger.error('call_offer_failed', { error });
       this.dependencies.sendError(ws, 'INTERNAL_ERROR', 'Failed to initiate call');

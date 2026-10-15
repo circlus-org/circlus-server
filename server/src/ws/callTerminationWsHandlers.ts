@@ -19,12 +19,16 @@ import {
   summarizeCallIceStats
 } from './callIceDiagnostics';
 import type { ConnectionInfo } from './wsConnectionContext';
+import type { CallAdmissionScope } from '../services/callAdmissionJournal';
 import {
   resolveCallLinkPresentation,
   type CallLinkPresentation
 } from '../services/callSessionPresentation';
 
 export type CallTerminationWsHandlerDependencies = {
+  cancelBeforeOffer: (scope: CallAdmissionScope, actionId: string) => Promise<boolean>;
+  hasOfferedRoute: (scope: CallAdmissionScope) => Promise<boolean>;
+  endAdmission: (familyId: string, callSessionId: string) => Promise<void>;
   getConnectionInfo: (ws: WebSocket) => ConnectionInfo | undefined;
   getIdentitySockets: (
     familyId: string,
@@ -88,7 +92,7 @@ export class CallTerminationWsHandlers {
     const message: WebSocketMessage = {
       type: 'call:ended', data: { callSessionId, reason }, timestamp: this.now()
     };
-    this.dependencies.sendMessage(route.initiatorWs, message);
+    if (route.initiatorWs) this.dependencies.sendMessage(route.initiatorWs, message);
     if (route.acceptedTargetWs) this.dependencies.sendMessage(route.acceptedTargetWs, message);
     for (const identityId of [route.initiatorIdentityId, route.targetIdentityId]) {
       this.dependencies.sendToConnectionSet(this.dependencies.getIdentitySockets(familyId, identityId), message);
@@ -331,6 +335,26 @@ export class CallTerminationWsHandlers {
       }
 
       const callSessionId = data?.callSessionId as CallSessionId | undefined;
+      const terminalActionId = data?.terminalActionId;
+      if (terminalActionId !== undefined && (typeof terminalActionId !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(terminalActionId)
+        || info.actorType !== 'local')) {
+        this.dependencies.sendError(ws, 'VALIDATION_ERROR', 'Invalid terminal action correlation');
+        return;
+      }
+      if (terminalActionId && info.actorType === 'local' && info.scopedCallSessionId !== callSessionId) {
+        this.logger.warn('call_terminal_route_rejected', {
+          operation: 'call.terminal', reason: 'CALL_TERMINAL_SCOPE_MISMATCH'
+        });
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'Terminal action requires the registered call scope');
+        return;
+      }
+      const terminalOnly = info.actorType === 'local' && info.callRuntimePurpose === 'terminal';
+      if (terminalOnly && !terminalActionId) {
+        this.dependencies.sendError(ws, 'VALIDATION_ERROR', 'Terminal action correlation is required'); return;
+      }
+      const receipt = terminalActionId ? { terminalActionId, identityId: info.identityId,
+        deviceId: info.actorType === 'local' ? info.deviceId : undefined } : {};
       const requestedReason = String(data?.reason || '').trim();
       this.dependencies.logCallDiag(`call_${kind}_received`, {
         callSessionId,
@@ -351,6 +375,20 @@ export class CallTerminationWsHandlers {
         callSessionId
       );
       if (!callSession) {
+        if (terminalActionId && info.actorType === 'local'
+            && (info.callRuntimeRole !== 'caller' || !info.scopedRemoteIdentityId || kind !== 'cancel')) {
+          this.logger.warn('call_terminal_route_rejected', { operation: 'call.earlyCancel', reason: 'CALL_EARLY_CANCEL_SCOPE_REQUIRED',
+            missingFields: [!info.callRuntimeRole && 'role', !info.scopedRemoteIdentityId && 'remoteIdentityId'].filter(Boolean) });
+          this.dependencies.sendError(ws, 'FORBIDDEN', 'Early cancel requires the explicit caller route'); return;
+        }
+        if (terminalActionId && info.actorType === 'local' && info.callRuntimeRole === 'caller'
+            && kind === 'cancel' && info.scopedRemoteIdentityId) {
+          const committed = await this.dependencies.cancelBeforeOffer({ familyId: info.familyId, callSessionId,
+            initiatorIdentityId: info.identityId, initiatorDeviceId: info.deviceId, targetIdentityId: info.scopedRemoteIdentityId }, terminalActionId);
+          if (!committed) { this.dependencies.sendError(ws, 'INVALID_STATE', 'Call admission changed; retry termination'); return; }
+          this.dependencies.sendMessage(ws, { type: 'call:ended', data: { callSessionId, reason: 'cancelled', ...receipt }, timestamp: this.now() });
+          return;
+        }
         this.handleMissingCall(ws, info, callSessionId, kind);
         return;
       }
@@ -360,6 +398,12 @@ export class CallTerminationWsHandlers {
       }
 
       if (callSession.state === 'ended' || callSession.state === 'expired') {
+        await this.dependencies.endAdmission(info.familyId, callSessionId);
+        // Durable retry after an ACK loss: the persisted terminal state is proof
+        // of completion. Scope was authenticated and participant-checked above.
+        if (terminalActionId) this.dependencies.sendMessage(ws, {
+          type: 'call:ended', data: { callSessionId, reason: 'already_ended', ...receipt }, timestamp: this.now()
+        });
         this.logger.debug('call_termination_duplicate_ignored', {
           familyId: info.familyId,
           callSessionId,
@@ -383,9 +427,31 @@ export class CallTerminationWsHandlers {
       const activeRouteWs = endedByInitiator
         ? route?.initiatorWs
         : route?.acceptedTargetWs;
-      const activeRouteDeviceId = endedByInitiator
+      let activeRouteDeviceId = endedByInitiator
         ? route?.initiatorDeviceId
         : route?.acceptedTargetDeviceId;
+      if (terminalOnly) {
+        if (route && route.familyId !== info.familyId) { this.logger.warn('call_terminal_route_rejected', { operation: 'call.terminal', reason: 'CALL_TERMINAL_CIRCLE_MISMATCH' }); this.dependencies.sendError(ws, 'FORBIDDEN', 'Terminal call route mismatch'); return; }
+        const connected = ['accepted', 'active'].includes(callSession.state);
+        // An API process restart removes sockets, but never changes the owner
+        // of an offered call. Recover only the caller device proven by the
+        // durable exact route, not a singleton/current device on this origin.
+        if (!route && endedByInitiator && info.callRuntimeRole === 'caller' && info.scopedRemoteIdentityId
+            && callSession.participants.length === 2 && callSession.participants.includes(info.scopedRemoteIdentityId)
+            && await this.dependencies.hasOfferedRoute({ familyId: info.familyId, callSessionId,
+              initiatorIdentityId: info.identityId, initiatorDeviceId: info.deviceId, targetIdentityId: info.scopedRemoteIdentityId })) {
+          activeRouteDeviceId = info.deviceId;
+        }
+        // A worker never rebinds the media socket. For an accepted call (and
+        // caller cancellation) it must prove the exact selected device.
+        if ((connected || endedByInitiator) && (!activeRouteDeviceId || activeRouteDeviceId !== info.deviceId)) {
+          this.logger.warn('call_terminal_route_rejected', { operation: 'call.terminal', reason: activeRouteDeviceId ? 'CALL_TERMINAL_DEVICE_MISMATCH' : 'CALL_TERMINAL_DEVICE_REQUIRED', missingFields: activeRouteDeviceId ? [] : ['selectedDeviceId'] });
+          this.dependencies.sendError(ws, 'FORBIDDEN', 'Terminal intent requires the selected device'); return;
+        }
+        // Local connecting/ringing UI can lag server acceptance. Interpret the
+        // persisted stop intent using durable state, without changing authority.
+        kind = connected ? 'hangup' : endedByInitiator ? 'cancel' : 'decline';
+      }
       const decision = resolveCallTermination({
         kind,
         requestedReason,
@@ -397,7 +463,7 @@ export class CallTerminationWsHandlers {
           initiatorIdentityId: callSession.initiator,
           participantIdentityIds: callSession.participants
         },
-        activeRouteSocket: !activeRouteWs
+        activeRouteSocket: terminalOnly ? 'none' : !activeRouteWs
           ? 'none'
           : activeRouteWs === ws
             ? 'current'
@@ -443,16 +509,25 @@ export class CallTerminationWsHandlers {
         cancellationNoDeliveryFallbackMs: this.dependencies.cancellationNoDeliveryFallbackMs,
         afterSessionEnded: () => this.dependencies.callRingingService.stop(callSessionId)
       });
+      await this.dependencies.endAdmission(info.familyId, callSessionId);
 
       // Acknowledge the originating socket before the client releases its call
       // context. Without this, a local cleanup can close the WebSocket while
       // the termination frame is still waiting in the server's work queue.
       this.dependencies.sendMessage(ws, {
         type: 'call:ended',
-        data: { callSessionId, reason: context.endReason },
+        data: { callSessionId, reason: context.endReason, ...receipt },
         timestamp: this.now()
       });
 
+      // A terminal worker is intentionally absent from the media route. The
+      // general-app sibling list also excludes native media runtimes, so notify
+      // the exact selected same-device media endpoint explicitly after commit.
+      if (terminalOnly && activeRouteWs && activeRouteWs !== ws) {
+        this.dependencies.sendMessage(activeRouteWs, {
+          type: 'call:ended', data: { callSessionId, reason: context.endReason }, timestamp: this.now()
+        });
+      }
       const otherParticipant = context.otherParticipantIdentityId as IdentityId | undefined;
       if (otherParticipant) {
         await this.notifyPeer({

@@ -9,8 +9,12 @@ import type { CallRingingService } from '../services/callRingingService';
 import type { CallSessionRoutingRegistry } from '../services/callSessionRoutingRegistry';
 import type { Logger } from '../utils/logger';
 import type { ConnectionInfo, LocalConnectionInfo } from './wsConnectionContext';
+import type { CallAdmissionScope } from '../services/callAdmissionJournal';
 
 export type CallSignalingWsHandlerDependencies = {
+  deliverSdp?: (info: ConnectionInfo, message: WebSocketMessage) => boolean;
+  hasDurableSdpPeer?: (info: ConnectionInfo, callId: string) => boolean;
+  prepareOffer: (scope: CallAdmissionScope, create: () => Promise<unknown>) => Promise<boolean>;
   getConnectionInfo: (ws: WebSocket) => ConnectionInfo | undefined;
   getWebIncomingCallSockets: (
     familyId: string,
@@ -77,12 +81,10 @@ export type CallSignalingWsHandlerDependencies = {
   logCallDiag: (event: string, details: Record<string, unknown>) => void;
   logger?: Logger;
   now?: () => number;
-  createCallSessionId?: () => CallSessionId;
   iceDiagnostics?: boolean;
 };
 
 export type CallSignalingWsHandlerRuntime = {
   now: () => number;
-  createCallSessionId: () => CallSessionId;
   logger: Logger;
 };

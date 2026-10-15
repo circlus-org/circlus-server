@@ -60,6 +60,9 @@ function harness(overrides: Partial<CallTerminationWsHandlerDependencies> = {}) 
   };
   const callRingingService = { stop: jest.fn() };
   const dependencies: CallTerminationWsHandlerDependencies = {
+    cancelBeforeOffer: jest.fn(async () => true),
+    hasOfferedRoute: jest.fn(async () => false),
+    endAdmission: jest.fn(async () => {}),
     getConnectionInfo: jest.fn(() => info),
     getIdentitySockets: jest.fn(() => new Set([peerWs])),
     getGeneralIdentitySockets: jest.fn(() => new Set([currentWs, siblingWs])),
@@ -88,6 +91,29 @@ function harness(overrides: Partial<CallTerminationWsHandlerDependencies> = {}) 
 }
 
 describe('call termination WebSocket handlers', () => {
+  it('ACKs a missing caller call only after durable commit with the exact authenticated route', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(null);
+    let commit!: (value: boolean) => void;
+    const committed = new Promise<boolean>(resolve => { commit = resolve; });
+    const action = 'bdb85e64-b01d-4647-9e2d-2654adf10a59';
+    const { handlers, dependencies } = harness({
+      getConnectionInfo: () => ({ ...info, actorType: 'local', callRuntimePurpose: 'terminal', callRuntimeRole: 'caller', scopedRemoteIdentityId: calleeIdentityId }),
+      cancelBeforeOffer: jest.fn(() => committed)
+    });
+    const result = handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: action }, 'cancel');
+    await Promise.resolve(); await Promise.resolve();
+    expect(dependencies.sendMessage).not.toHaveBeenCalled();
+    expect(dependencies.cancelBeforeOffer).toHaveBeenCalledWith({ familyId: 'family-1', callSessionId: 'call-1', initiatorIdentityId: callerIdentityId, initiatorDeviceId: 'device-caller', targetIdentityId: calleeIdentityId }, action);
+    commit(true); await result;
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(currentWs, expect.objectContaining({ type: 'call:ended', data: { callSessionId: 'call-1', reason: 'cancelled', terminalActionId: action, identityId: callerIdentityId, deviceId: 'device-caller' } }));
+    expect(dependencies.rememberEarlyEndedCallSession).not.toHaveBeenCalled();
+  });
+  it('never ACKs a failed durable pre-offer write', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(null);
+    const { handlers, dependencies } = harness({ getConnectionInfo: () => ({ ...info, actorType: 'local', callRuntimeRole: 'caller', scopedRemoteIdentityId: calleeIdentityId }), cancelBeforeOffer: jest.fn(async () => { throw new Error('database failed'); }) });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'bdb85e64-b01d-4647-9e2d-2654adf10a59' }, 'cancel');
+    expect(dependencies.sendMessage).not.toHaveBeenCalled(); expect(dependencies.sendError).toHaveBeenCalled();
+  });
   it('releases the accepted browser before timeout persistence completes', async () => {
     let releaseEnd!: () => void;
     (callSessionRepository.end as jest.Mock).mockReturnValueOnce(new Promise<void>(resolve => { releaseEnd = resolve; }));
@@ -308,6 +334,102 @@ describe('call termination WebSocket handlers', () => {
       `call_${kind}_duplicate_terminal_ignored`,
       expect.objectContaining({ callSessionId: 'call-1', state })
     );
+  });
+
+  it.each(['ended', 'expired'])('acknowledges a durable retry for %s without repeating effects', async state => {
+    const terminalActionId = 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff';
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state
+    });
+    const { handlers, dependencies } = harness();
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId }, 'hangup');
+    expect(callSessionRepository.findByCallSessionId).toHaveBeenCalledWith('family-1', 'call-1');
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(currentWs, expect.objectContaining({
+      type: 'call:ended', data: { callSessionId: 'call-1', reason: 'already_ended', terminalActionId,
+        identityId: callerIdentityId, deviceId: 'device-caller' }
+    }));
+    expect(persistCallTermination).not.toHaveBeenCalled();
+    expect(sendCallStatusPush).not.toHaveBeenCalled();
+  });
+
+  it('never confirms another Circle or a non-participant terminal call', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({
+      participants: ['different-identity', calleeIdentityId], initiator: 'different-identity', state: 'ended'
+    });
+    const { handlers, dependencies } = harness();
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'hangup');
+    expect(dependencies.sendMessage).not.toHaveBeenCalled();
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'FORBIDDEN', expect.any(String));
+  });
+
+  it.each(['', 'opaque-id', 1])('rejects invalid terminal correlation %s', async terminalActionId => {
+    const { handlers, dependencies } = harness();
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId }, 'hangup');
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'VALIDATION_ERROR', expect.any(String));
+    expect(callSessionRepository.findByCallSessionId).not.toHaveBeenCalled();
+  });
+
+  it('rejects a terminal receipt request for a different registered call', async () => {
+    const { handlers, dependencies } = harness();
+    await handlers.handle(currentWs, { callSessionId: 'call-other', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'hangup');
+    expect(callSessionRepository.findByCallSessionId).not.toHaveBeenCalled();
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'FORBIDDEN', expect.any(String));
+  });
+
+  it('keeps a missing early-cancel route unacknowledged', async () => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(null);
+    const { handlers, dependencies } = harness();
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'cancel');
+    expect(dependencies.sendMessage).not.toHaveBeenCalled();
+  });
+  it.each([true, false])('uses only an exact durable caller route after socket state is lost: proven=%s', async proven => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state: 'ringing' });
+    (resolveCallTermination as jest.Mock).mockReturnValue({ accepted: false, reason: 'test-policy-stop' });
+    const { handlers, dependencies } = harness({
+      getConnectionInfo: () => ({ ...info, callRuntimePurpose: 'terminal', callRuntimeRole: 'caller', scopedRemoteIdentityId: calleeIdentityId }),
+      hasOfferedRoute: jest.fn(async () => proven)
+    });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'cancel');
+    expect(dependencies.hasOfferedRoute).toHaveBeenCalledWith({ familyId: 'family-1', callSessionId: 'call-1', initiatorIdentityId: callerIdentityId, initiatorDeviceId: 'device-caller', targetIdentityId: calleeIdentityId });
+    if (proven) expect(resolveCallTermination).toHaveBeenCalledWith(expect.objectContaining({ activeRouteDeviceId: 'device-caller', activeRouteSocket: 'none' }));
+    else expect(resolveCallTermination).not.toHaveBeenCalled();
+    expect(dependencies.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(['active', 'ringing'])('terminal-only uses durable %s state without binding another media socket', async state => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state });
+    (resolveCallTermination as jest.Mock).mockReturnValue({ accepted: false, reason: 'test-policy-stop' });
+    const { handlers, callSessionRouting } = harness({ getConnectionInfo: () => ({ ...info, callRuntimePurpose: 'terminal' }) });
+    callSessionRouting.get.mockReturnValue({ familyId: info.familyId, initiatorWs: peerWs, initiatorDeviceId: 'device-caller' });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'cancel');
+    expect(resolveCallTermination).toHaveBeenCalledWith(expect.objectContaining({ kind: state === 'active' ? 'hangup' : 'cancel', activeRouteSocket: 'none', actorDeviceId: 'device-caller' }));
+  });
+
+  it.each(['other-device', undefined])('terminal-only never ends another/unknown selected device %s', async device => {
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state: 'active' });
+    const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => ({ ...info, callRuntimePurpose: 'terminal' }) });
+    callSessionRouting.get.mockReturnValue({ familyId: info.familyId, initiatorWs: peerWs, initiatorDeviceId: device });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'cancel');
+    expect(resolveCallTermination).not.toHaveBeenCalled(); expect(persistCallTermination).not.toHaveBeenCalled();
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'FORBIDDEN', expect.any(String));
+  });
+
+  it.each(['caller', 'callee'])('notifies the exact selected %s media endpoint when a terminal worker commits', async role => {
+    const actor = role === 'caller' ? callerIdentityId : calleeIdentityId;
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ participants: [callerIdentityId, calleeIdentityId], initiator: callerIdentityId, state: 'active' });
+    (resolveCallTermination as jest.Mock).mockReturnValue({ accepted: true, context: { endReason: 'ended', pushEndReason: 'normal', peerPushStatus: 'ended' } });
+    const mediaWs = {} as WebSocket;
+    const { handlers, dependencies, callSessionRouting } = harness({ getConnectionInfo: () => ({ ...info, identityId: actor, callRuntimePurpose: 'terminal' }), getGeneralIdentitySockets: () => new Set() });
+    callSessionRouting.get.mockReturnValue({ familyId: info.familyId, initiatorWs: role === 'caller' ? mediaWs : peerWs,
+      acceptedTargetWs: role === 'callee' ? mediaWs : peerWs, initiatorDeviceId: 'device-caller', acceptedTargetDeviceId: 'device-caller' });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'hangup');
+    expect(persistCallTermination).toHaveBeenCalledTimes(1);
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(mediaWs, expect.objectContaining({ type: 'call:ended', data: { callSessionId: 'call-1', reason: 'ended' } }));
+    const sent = jest.mocked(dependencies.sendMessage).mock.calls;
+    expect(sent.some(([socket, message]) => socket === mediaWs && message.type === 'call:ended')).toBe(true);
+    expect(sent.some(([socket]) => socket === peerWs)).toBe(false);
+    const persistOrder = jest.mocked(persistCallTermination).mock.invocationCallOrder[0];
+    expect(jest.mocked(dependencies.sendMessage).mock.invocationCallOrder[0]).toBeGreaterThan(persistOrder);
   });
 
   it('persists, notifies and cleans up an accepted termination', async () => {
