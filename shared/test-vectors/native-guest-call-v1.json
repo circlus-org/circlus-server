@@ -1,0 +1,159 @@
+{
+  "description": "Public deterministic test material; never use these keys for real calls",
+  "cases": [
+    {
+      "name": "external-circle-a",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-a",
+        "callSessionId": "call-external-circle-a",
+        "identityId": "WYXIM75C6M5P4YWV22YWILQWEH",
+        "deviceId": "ext:WYXIM75C6M5P4YWV22YWILQWEH",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"external\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-a\",\"callSessionId\":\"call-external-circle-a\",\"identityId\":\"WYXIM75C6M5P4YWV22YWILQWEH\",\"deviceId\":\"ext:WYXIM75C6M5P4YWV22YWILQWEH\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400}",
+        "signature": "zj1+lsHSU+9NdvbcgaJomYWL6ZuVLr4V2mFpIy90vvDPhQ5564Jmd0XUMWpnGn16c3TmMMFf5dVCXHMSWM9hDQ=="
+      },
+      "rootPublicKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw==",
+      "externalRegistration": {
+        "externalIdentityId": "WYXIM75C6M5P4YWV22YWILQWEH",
+        "externalPublicKey": {
+          "algorithm": "ed25519",
+          "value": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E="
+        },
+        "admission": {
+          "kind": "whitelist_key",
+          "targetIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP"
+        }
+      }
+    },
+    {
+      "name": "external-circle-b",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-b",
+        "callSessionId": "call-external-circle-b",
+        "identityId": "WYXIM75C6M5P4YWV22YWILQWEH",
+        "deviceId": "ext:WYXIM75C6M5P4YWV22YWILQWEH",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"external\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-b\",\"callSessionId\":\"call-external-circle-b\",\"identityId\":\"WYXIM75C6M5P4YWV22YWILQWEH\",\"deviceId\":\"ext:WYXIM75C6M5P4YWV22YWILQWEH\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400}",
+        "signature": "Pjfwv+Fd1cebetczn9yN+79ub7y/Zsqw4KU+0i5dSNZ2jlaOmPBVJjgfxgFXTn+EMrNKuvQq8GzLqxTZI403Aw=="
+      },
+      "rootPublicKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw==",
+      "externalRegistration": {
+        "externalIdentityId": "WYXIM75C6M5P4YWV22YWILQWEH",
+        "externalPublicKey": {
+          "algorithm": "ed25519",
+          "value": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY/k2NsFGFKyHN9E="
+        },
+        "admission": {
+          "kind": "whitelist_key",
+          "targetIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP"
+        }
+      }
+    },
+    {
+      "name": "temporary-circle-a",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-a",
+        "callSessionId": "call-temporary-circle-a",
+        "identityId": "72ASYEXTVNGONLC5W2NMGUXZA3",
+        "deviceId": "temporary-device",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"temporary\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-a\",\"callSessionId\":\"call-temporary-circle-a\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"deviceId\":\"temporary-device\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400,\"temporaryIdentityDelegation\":{\"vpsId\":\"vps-test\",\"circleId\":\"circle-a\",\"type\":\"temporary-identity:delegate\",\"signerId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"nonce\":\"public-test-nonce\",\"timestamp\":1792072800000,\"payload\":{\"version\":1,\"purpose\":\"temporary-identity-delegation-v1\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"identityPublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\"},\"temporaryDeviceId\":\"temporary-device\",\"temporaryDevicePublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=\"},\"capabilities\":[\"messages\",\"calls\"],\"scope\":{\"serverOrigin\":\"https://same.example\",\"directChatIds\":[\"72ASYEXTVNGONLC5W2NMGUXZA3::CC5GQLEK2E2RHFY6RNLIQGVLRP\"]},\"issuedAt\":\"2026-10-15T14:00:00.000Z\",\"notBefore\":\"2026-10-15T13:59:00.000Z\",\"expiresAt\":\"2026-10-15T16:00:00.000Z\",\"issuerDeviceId\":\"issuer-device\",\"delegationId\":\"public-test-delegation\"},\"signature\":\"ZvFv/86atMoRdLAgkXMI5ApA9SzFlJpgPXzgeCc4bbwujs5ADfUGi7RDl+c5NySD9kLumpXLLW0JgsgTETkHCw==\"}}",
+        "signature": "x4GCAeXGaZqH+pl216fNRtL65Kwq9PiPylBEnE/JSP0txcpN2ojJKNFxaBk2nb/ruL+JpcKdbJf5h/SOGa+dBg=="
+      },
+      "rootPublicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw=="
+    },
+    {
+      "name": "temporary-circle-b",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-b",
+        "callSessionId": "call-temporary-circle-b",
+        "identityId": "72ASYEXTVNGONLC5W2NMGUXZA3",
+        "deviceId": "temporary-device",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"temporary\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-b\",\"callSessionId\":\"call-temporary-circle-b\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"deviceId\":\"temporary-device\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400,\"temporaryIdentityDelegation\":{\"vpsId\":\"vps-test\",\"circleId\":\"circle-b\",\"type\":\"temporary-identity:delegate\",\"signerId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"nonce\":\"public-test-nonce\",\"timestamp\":1792072800000,\"payload\":{\"version\":1,\"purpose\":\"temporary-identity-delegation-v1\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"identityPublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\"},\"temporaryDeviceId\":\"temporary-device\",\"temporaryDevicePublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=\"},\"capabilities\":[\"messages\",\"calls\"],\"scope\":{\"serverOrigin\":\"https://same.example\",\"directChatIds\":[\"72ASYEXTVNGONLC5W2NMGUXZA3::CC5GQLEK2E2RHFY6RNLIQGVLRP\"]},\"issuedAt\":\"2026-10-15T14:00:00.000Z\",\"notBefore\":\"2026-10-15T13:59:00.000Z\",\"expiresAt\":\"2026-10-15T16:00:00.000Z\",\"issuerDeviceId\":\"issuer-device\",\"delegationId\":\"public-test-delegation\"},\"signature\":\"7cb0N7AlnfMnjiOsteLnH43pm28zYTxR6lRYYC4DNOGF2OTLLbS885FBK90MbCwBP8atD4wCroCo0HcwCLBeAA==\"}}",
+        "signature": "i1WqbKKPhxnTUHcIIIsV5jKAfNqKC///KXiMTb+SXdJMTGCROuHZhea/dewoHrq65HeDwTgXrB6uZQSeuRjsDg=="
+      },
+      "rootPublicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw=="
+    },
+    {
+      "name": "temporary-parent-v1-no-envelope-route-circle-a",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-a",
+        "callSessionId": "call-temporary-circle-a",
+        "identityId": "72ASYEXTVNGONLC5W2NMGUXZA3",
+        "deviceId": "temporary-device",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"temporary\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-a\",\"callSessionId\":\"call-temporary-circle-a\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"deviceId\":\"temporary-device\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400,\"temporaryIdentityDelegation\":{\"type\":\"temporary-identity:delegate\",\"signerId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"nonce\":\"public-test-nonce\",\"timestamp\":1792072800000,\"payload\":{\"version\":1,\"purpose\":\"temporary-identity-delegation-v1\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"identityPublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\"},\"temporaryDeviceId\":\"temporary-device\",\"temporaryDevicePublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=\"},\"capabilities\":[\"messages\",\"calls\"],\"scope\":{\"serverOrigin\":\"https://same.example\",\"directChatIds\":[\"72ASYEXTVNGONLC5W2NMGUXZA3::CC5GQLEK2E2RHFY6RNLIQGVLRP\"]},\"issuedAt\":\"2026-10-15T14:00:00.000Z\",\"notBefore\":\"2026-10-15T13:59:00.000Z\",\"expiresAt\":\"2026-10-15T16:00:00.000Z\",\"issuerDeviceId\":\"issuer-device\",\"delegationId\":\"public-test-delegation\"},\"signature\":\"8c47cxPPE2XrSxSWMGm+HSxFMmdeNnp14GKnlzQlm6ZXL3sY7bMOIdninVevRRY3Wjt793VOLU2waZukf1W+DA==\"}}",
+        "signature": "GFedkj91D8Bb/C+YmDiqXi/K8+0KXF+xj/WtO8MWuUk5ZU/ZfQxzdqHdt3nu6U9+iZe4aBH08sdfmIYMbSrECA=="
+      },
+      "rootPublicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw=="
+    },
+    {
+      "name": "temporary-parent-v1-no-envelope-route-circle-b",
+      "now": 1792072800,
+      "scope": {
+        "vpsId": "vps-test",
+        "circleId": "circle-b",
+        "callSessionId": "call-temporary-circle-b",
+        "identityId": "72ASYEXTVNGONLC5W2NMGUXZA3",
+        "deviceId": "temporary-device",
+        "remoteIdentityId": "CC5GQLEK2E2RHFY6RNLIQGVLRP",
+        "role": "caller",
+        "serverOrigin": "https://same.example"
+      },
+      "seed": "DQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0=",
+      "delegation": {
+        "payload": "{\"type\":\"circlus.native-guest-call.delegation.v1\",\"kind\":\"temporary\",\"vpsId\":\"vps-test\",\"circleId\":\"circle-b\",\"callSessionId\":\"call-temporary-circle-b\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"deviceId\":\"temporary-device\",\"remoteIdentityId\":\"CC5GQLEK2E2RHFY6RNLIQGVLRP\",\"role\":\"caller\",\"serverOrigin\":\"https://same.example\",\"identityPublicKey\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\",\"callSigningPublicKey\":\"kaKKC3Q4FZOk2UaVeSCJJq/IrYLIg5t2RDWbnrqaSzo=\",\"createdAt\":1792072800,\"notBefore\":1792072770,\"expiresAt\":1792076400,\"temporaryIdentityDelegation\":{\"type\":\"temporary-identity:delegate\",\"signerId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"nonce\":\"public-test-nonce\",\"timestamp\":1792072800000,\"payload\":{\"version\":1,\"purpose\":\"temporary-identity-delegation-v1\",\"identityId\":\"72ASYEXTVNGONLC5W2NMGUXZA3\",\"identityPublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\"},\"temporaryDeviceId\":\"temporary-device\",\"temporaryDevicePublicKey\":{\"algorithm\":\"ed25519\",\"value\":\"Zr5+Myx6RTMyvZ0Kf32wVfXF7xoGraZtmLOftoEMRzo=\"},\"capabilities\":[\"messages\",\"calls\"],\"scope\":{\"serverOrigin\":\"https://same.example\",\"directChatIds\":[\"72ASYEXTVNGONLC5W2NMGUXZA3::CC5GQLEK2E2RHFY6RNLIQGVLRP\"]},\"issuedAt\":\"2026-10-15T14:00:00.000Z\",\"notBefore\":\"2026-10-15T13:59:00.000Z\",\"expiresAt\":\"2026-10-15T16:00:00.000Z\",\"issuerDeviceId\":\"issuer-device\",\"delegationId\":\"public-test-delegation\"},\"signature\":\"8c47cxPPE2XrSxSWMGm+HSxFMmdeNnp14GKnlzQlm6ZXL3sY7bMOIdninVevRRY3Wjt793VOLU2waZukf1W+DA==\"}}",
+        "signature": "VfYUtIxwgEfxFi4Kr9WpUifqMpuisY57d5Ka/9RStStyT5z3T2X/AjEleZ7R3GIRcbnKr32sepMtpEtaCC+uBg=="
+      },
+      "rootPublicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "fingerprint": "sha-256 AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB:AB",
+      "dtlsSignature": "kjuCl7epYXg8IF6KxGFEXq1mQOpf2gb92EhgmozixfO513brptxstZ+HNpmiSQqH1/iryLhH03OhlaAb/tBSBw=="
+    }
+  ]
+}

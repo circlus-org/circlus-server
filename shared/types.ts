@@ -2164,6 +2164,8 @@ export type WSRegisterCallRuntimeData = {
     deviceId?: DeviceId;
     vpsId?: string;
     circleId?: string;
+    /** Transport address for the explicit native guest scope, never a Circle selector. */
+    serverOrigin?: string;
     callKeyDelegation?: {
       payload?: string;
       signature?: string;

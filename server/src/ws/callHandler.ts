@@ -54,6 +54,7 @@ import { CallLifecycleWsHandlers } from './callLifecycleWsHandlers';
 import { CallIceWsHandler } from './callIceWsHandler';
 import { configService } from '../services/configService';
 import { getMobileCallIceServers } from '../services/mobileCallIce';
+import { verifyNativeGuestCallDelegation } from '../services/nativeGuestCallDelegation';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
 import { DirectMessageWsHandlers } from './directMessageWsHandlers';
 import {
@@ -339,7 +340,7 @@ let httpCallRuntimeSessionManager: HttpCallRuntimeSessionManager;
 const wsTransport = createWsTransport({
   findHttpRuntimeQueue: (ws) => httpCallRuntimeSessionManager?.findQueueBySocket(ws) || null,
   maxHttpRuntimeQueue: HTTP_CALL_SIGNALING_MAX_QUEUE,
-  canSend: (ws, message) => isOutboundMessageAllowedForConnection(connectionRegistry.getInfo(ws), message.type)
+  canSend: (ws, message) => isOutboundMessageAllowedForConnection(connectionRegistry.getInfo(ws), message.type, message.data)
 });
 function sendMessage(ws: WebSocket, message: WebSocketMessage): void {
   message = callSdpRecovery.capture(ws, message);
@@ -596,12 +597,22 @@ async function validateTemporaryCallDelegation(params: {
 }): Promise<boolean> {
   if (!params.info.isTemporaryDevice) return true;
   const serialized = params.callKeyDelegation?.payload;
-  const envelopeSignature = params.callKeyDelegation?.signature;
+  let envelopeSignature = params.callKeyDelegation?.signature;
   if (!serialized || !envelopeSignature) return false;
 
   let credential: TemporaryIdentityDelegationCredential;
   try {
-    credential = JSON.parse(serialized) as TemporaryIdentityDelegationCredential;
+    const parsed = JSON.parse(serialized);
+    if (parsed.type === 'circlus.native-guest-call.delegation.v1') {
+      const claims = await verifyNativeGuestCallDelegation(params.callKeyDelegation ?? undefined, {
+        vpsId: getServerIdentityRuntimeConfig().vpsId, circleId: parsed.circleId,
+        callSessionId: params.info.scopedCallSessionId!, identityId: params.info.identityId, deviceId: params.info.deviceId,
+        remoteIdentityId: params.peerIdentityId, role: params.info.callRuntimeRole!, serverOrigin: parsed.serverOrigin
+      });
+      const circle = await configService.getFamilyConfig(params.info.familyId);
+      if (!claims || claims.kind !== 'temporary' || circle?.circle_id !== claims.circleId) return false;
+      credential = claims.temporaryIdentityDelegation!; envelopeSignature = credential.signature;
+    } else { credential = parsed as TemporaryIdentityDelegationCredential; }
   } catch {
     return false;
   }
@@ -720,6 +731,7 @@ const wsRegistrationHandlers = new WsRegistrationHandlers({
   replayStoredIceCandidates,
   callSessionRouting,
   restoreCallRoute,
+  getGuestIce: getMobileCallIceServers,
   describeSocket,
   logCallDiag,
   validateDirectFileRuntimeRegistration: (scope) => (

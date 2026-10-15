@@ -651,3 +651,28 @@ describe('call termination WebSocket handlers', () => {
     });
   });
 });
+
+
+describe('native external guest terminal correlation', () => {
+  it.each(['circle-a', 'circle-b'])('acknowledges only the explicitly scoped external guest in %s', async familyId => {
+    const guest = { actorType: 'external', familyId, identityId: callerIdentityId, deviceId: `ext:${callerIdentityId}`,
+      runtimeMode: 'video-native', scopedCallSessionId: 'call-1', scopedRemoteIdentityId: calleeIdentityId,
+      nativeGuestExpiresAt: Date.now() + 60000, externalPublicKey: { algorithm: 'ed25519', value: 'public' } } as ConnectionInfo;
+    const { handlers, dependencies } = harness({ getConnectionInfo: () => guest, now: Date.now });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue({ state: 'ended', initiator: callerIdentityId, participants: [callerIdentityId, calleeIdentityId] });
+    const terminalActionId = 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff';
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId }, 'cancel');
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(currentWs, expect.objectContaining({ type: 'call:ended',
+      data: expect.objectContaining({ callSessionId: 'call-1', terminalActionId, deviceId: `ext:${callerIdentityId}` }) }));
+    (dependencies.sendMessage as jest.Mock).mockClear();
+    await handlers.handle(currentWs, { callSessionId: 'other-call', terminalActionId }, 'cancel');
+    expect(dependencies.sendMessage).not.toHaveBeenCalled();
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'FORBIDDEN', expect.any(String));
+  });
+  it('does not authorize correlation for an ordinary external web socket', async () => {
+    const guest = { actorType: 'external', familyId: 'family', identityId: 'guest', deviceId: 'ext:guest', externalPublicKey: { algorithm: 'ed25519', value: 'public' } } as ConnectionInfo;
+    const { handlers, dependencies } = harness({ getConnectionInfo: () => guest });
+    await handlers.handle(currentWs, { callSessionId: 'call-1', terminalActionId: 'aaabbbbb-cccc-4ddd-8eee-ffffffffffff' }, 'cancel');
+    expect(dependencies.sendError).toHaveBeenCalledWith(currentWs, 'VALIDATION_ERROR', expect.any(String));
+  });
+});

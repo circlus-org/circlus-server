@@ -336,13 +336,15 @@ export class CallTerminationWsHandlers {
 
       const callSessionId = data?.callSessionId as CallSessionId | undefined;
       const terminalActionId = data?.terminalActionId;
+      const nativeGuest = info.actorType === 'external' && info.runtimeMode === 'video-native'
+        && info.nativeGuestExpiresAt !== undefined && info.nativeGuestExpiresAt > this.now();
       if (terminalActionId !== undefined && (typeof terminalActionId !== 'string'
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(terminalActionId)
-        || info.actorType !== 'local')) {
+        || (info.actorType !== 'local' && !nativeGuest))) {
         this.dependencies.sendError(ws, 'VALIDATION_ERROR', 'Invalid terminal action correlation');
         return;
       }
-      if (terminalActionId && info.actorType === 'local' && info.scopedCallSessionId !== callSessionId) {
+      if (terminalActionId && (info.actorType === 'local' || nativeGuest) && info.scopedCallSessionId !== callSessionId) {
         this.logger.warn('call_terminal_route_rejected', {
           operation: 'call.terminal', reason: 'CALL_TERMINAL_SCOPE_MISMATCH'
         });
@@ -354,7 +356,7 @@ export class CallTerminationWsHandlers {
         this.dependencies.sendError(ws, 'VALIDATION_ERROR', 'Terminal action correlation is required'); return;
       }
       const receipt = terminalActionId ? { terminalActionId, identityId: info.identityId,
-        deviceId: info.actorType === 'local' ? info.deviceId : undefined } : {};
+        deviceId: info.actorType === 'local' || nativeGuest ? info.deviceId : undefined } : {};
       const requestedReason = String(data?.reason || '').trim();
       this.dependencies.logCallDiag(`call_${kind}_received`, {
         callSessionId,

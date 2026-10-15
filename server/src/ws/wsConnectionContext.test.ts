@@ -125,3 +125,17 @@ describe('native call-runtime v1 explicit command scope', () => {
     expect(nativeCallScopeFailure({ ...info, runtimeMode: 'default' }, undefined)).toBeUndefined();
   });
 });
+
+it('keeps native guest sockets confined to their single call and out of general ringing', () => {
+  const guest = { actorType: 'external', identityId: 'guest', deviceId: 'ext:guest', familyId: 'family',
+    runtimeMode: 'video-native', scopedCallSessionId: 'call-a', scopedRemoteIdentityId: 'peer',
+    nativeGuestExpiresAt: Date.now() + 60000, externalPublicKey: { algorithm: 'ed25519', value: 'public' } } as const;
+  expect(isIncomingCallRecipient(guest as any)).toBe(false);
+  for (const id of [undefined, 'call-b']) {
+    expect(isOutboundMessageAllowedForConnection(guest as any, 'call:answered', { callSessionId: id })).toBe(false);
+  }
+  expect(isOutboundMessageAllowedForConnection(guest as any, 'call:answered', { callSessionId: 'call-a' })).toBe(true);
+  expect(isOutboundMessageAllowedForConnection(guest as any, 'message:incoming')).toBe(false);
+  expect(nativeCallScopeFailure(guest as any, 'call-b')?.reason).toBe('CALL_RUNTIME_CALL_MISMATCH');
+  expect(isMessageAllowedForConnection({ ...guest, nativeGuestExpiresAt: Date.now() - 1 } as any, 'call:offer')).toBe(false);
+});

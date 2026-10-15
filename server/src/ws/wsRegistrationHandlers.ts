@@ -30,6 +30,8 @@ import type { ConnectionInfo, LocalConnectionInfo } from './wsConnectionContext'
 import type { LinkCapabilityProof } from '../../../shared/linkCapability';
 import type { CallLinkGrantResult } from '../services/callAdmissionService';
 import { getServerIdentityRuntimeConfig } from '../config/serverRuntimeConfig';
+import { verifyNativeGuestCallDelegation } from '../services/nativeGuestCallDelegation';
+import type { NativeGuestCallClaims } from '../../../shared/nativeGuestCall';
 
 export type ExternalRegisterPayload = {
   externalIdentityId: string;
@@ -38,6 +40,7 @@ export type ExternalRegisterPayload = {
     value: string;
   };
   displayName?: string;
+  nativeGuestDelegation?: { payload: string; signature: string };
   admission?:
     | {
         kind: 'call_link';
@@ -80,6 +83,7 @@ export type WsRegistrationHandlerDependencies = {
   describeSocket: (ws: WebSocket) => Record<string, string | undefined>;
   logCallDiag: (event: string, details: Record<string, unknown>) => void;
   restoreCallRoute?: (familyId: string, callId: string) => Promise<void>;
+  getGuestIce?: (scope: { familyId: string; callSessionId: string }) => Promise<unknown[]>;
   validateDirectFileRuntimeRegistration: (
     scope: DirectFileRuntimeRegistrationScope
   ) => boolean | Promise<boolean>;
@@ -88,7 +92,7 @@ export type WsRegistrationHandlerDependencies = {
 };
 
 type CallRuntimeRegistrationActor =
-  | { ok: true; familyId: string; identityId: string; device: any }
+  | { ok: true; familyId: string; identityId: string; device: any; guest?: NativeGuestCallClaims }
   | { ok: false; code: string; message: string };
 
 export type DirectFileRuntimeRegistrationScope = {
@@ -323,6 +327,13 @@ export class WsRegistrationHandlers {
 
 
       const { device, familyId, identityId } = actor;
+      const guestIce = actor.guest ? await this.guestIce(ws, familyId, callSessionId) : undefined;
+      if (actor.guest && !guestIce) return;
+      if (actor.guest) {
+        // ICE lookup can suspend registration. Re-read revocation and time before binding.
+        const fresh = await this.resolveCallRuntimeRegistrationActor(signedRequest, socketFamilyId);
+        if (!fresh.ok) { this.dependencies.sendError(ws, fresh.code, fresh.message); return; }
+      }
       const suppliedRoute = [
         ['identityId', payload.identityId, identityId], ['deviceId', payload.deviceId, device.device_id],
         ['circleId', payload.circleId, signedRequest.circleId], ['vpsId', payload.vpsId, signedRequest.vpsId]
@@ -394,6 +405,7 @@ export class WsRegistrationHandlers {
         scopedCallSessionId: callSessionId as CallSessionId,
         scopedRemoteIdentityId: remoteIdentityId as IdentityId,
         callRuntimeRole: role,
+        ...(actor.guest ? { isTemporaryDevice: true, nativeGuestExpiresAt: actor.guest.expiresAt * 1000 } : {}),
         ...(sdpRecoveryVersion === 1 ? { sdpRecoveryVersion: 1 as const } : {}),
         ...(purpose === 'terminal' ? { callRuntimePurpose: 'terminal' as const } : {})
       };
@@ -413,8 +425,10 @@ export class WsRegistrationHandlers {
         deviceId: device.device_id,
         callSessionId,
         runtimeMode: mode,
+        ...(guestIce ? { nativeGuestCallVersion: 1, iceServers: guestIce } : {}),
         ...(purpose === 'terminal' ? { purpose: 'terminal' } : {})
       });
+      if (actor.guest) this.expireGuest(ws, actor.guest.expiresAt * 1000);
       this.logger.info('ws_call_runtime_registration_completed', {
         familyId,
         identityId,
@@ -600,11 +614,24 @@ export class WsRegistrationHandlers {
         this.dependencies.sendError(ws, 'INVALID_SIGNATURE', 'External identity mismatch');
         return;
       }
-      if (String(signedRequest.signerId || '').trim() !== declaredIdentityId) {
+      let nativeGuest: NativeGuestCallClaims | null = null;
+      if (payload.nativeGuestDelegation) {
+        let claims: NativeGuestCallClaims;
+        try { claims = JSON.parse(payload.nativeGuestDelegation.payload); } catch { this.dependencies.sendError(ws, 'FORBIDDEN', 'CALL_GUEST_DELEGATION_INVALID'); return; }
+        nativeGuest = await verifyNativeGuestCallDelegation(payload.nativeGuestDelegation, {
+          vpsId: signedRequest.vpsId!, circleId: signedRequest.circleId!, callSessionId: claims.callSessionId,
+          identityId: declaredIdentityId, deviceId: `ext:${declaredIdentityId}`, remoteIdentityId: payload.admission.targetIdentityId,
+          role: 'caller', serverOrigin: claims.serverOrigin
+        }, now / 1000);
+        if (payload.externalPublicKey.algorithm !== 'ed25519' || !nativeGuest || nativeGuest.kind !== 'external' || nativeGuest.identityPublicKey !== payload.externalPublicKey.value) {
+          this.dependencies.sendError(ws, 'FORBIDDEN', 'CALL_GUEST_DELEGATION_INVALID'); return;
+        }
+      }
+      if (String(signedRequest.signerId || '').trim() !== (nativeGuest?.callSigningPublicKey ?? declaredIdentityId)) {
         this.dependencies.sendError(ws, 'INVALID_SIGNATURE', 'Signer mismatch');
         return;
       }
-      if (!verifySignedRequest(signedRequest, payload.externalPublicKey)) {
+      if (!verifySignedRequest(signedRequest, nativeGuest ? { algorithm: 'ed25519', value: nativeGuest.callSigningPublicKey } : payload.externalPublicKey)) {
         this.dependencies.sendError(ws, 'INVALID_SIGNATURE', 'Invalid signature');
         return;
       }
@@ -650,11 +677,18 @@ export class WsRegistrationHandlers {
         ? grant as CallLinkGrantResult
         : null;
       const deviceId = `ext:${declaredIdentityId}` as DeviceId;
+      const guestIce = nativeGuest ? await this.guestIce(ws, familyId, nativeGuest.callSessionId) : undefined;
+      if (nativeGuest && !guestIce) return;
+      if (nativeGuest && nativeGuest.expiresAt * 1000 <= this.now()) {
+        this.dependencies.sendError(ws, 'FORBIDDEN', 'CALL_GUEST_EXPIRED'); return;
+      }
       this.dependencies.registerConnection(ws, {
         actorType: 'external',
         identityId: declaredIdentityId as IdentityId,
         deviceId,
         familyId,
+        ...(nativeGuest ? { runtimeMode: 'video-native' as const, callRuntimeRole: 'caller' as const, scopedCallSessionId: nativeGuest.callSessionId as CallSessionId,
+          scopedRemoteIdentityId: targetIdentityId, nativeGuestExpiresAt: nativeGuest.expiresAt * 1000 } : {}),
         externalPublicKey: payload.externalPublicKey,
         externalDisplayName: payload.displayName ? String(payload.displayName).trim() : undefined,
         callGrant: {
@@ -671,8 +705,10 @@ export class WsRegistrationHandlers {
       this.sendRegistered(ws, {
         identityId: declaredIdentityId,
         deviceId,
-        actorType: 'external'
+        actorType: 'external',
+        ...(nativeGuest ? { callSessionId: nativeGuest.callSessionId, runtimeMode: 'video-native', nativeGuestCallVersion: 1, iceServers: guestIce } : {})
       });
+      if (nativeGuest) this.expireGuest(ws, nativeGuest.expiresAt * 1000);
       this.logger.info('ws_external_registration_completed', {
         familyId,
         identityId: declaredIdentityId,
@@ -958,6 +994,30 @@ export class WsRegistrationHandlers {
     familyId: string
   ): Promise<CallRuntimeRegistrationActor> {
     const delegation = signedRequest.payload?.callKeyDelegation;
+    let candidate: { type?: string } | undefined;
+    try { candidate = delegation?.payload ? JSON.parse(delegation.payload) : undefined; } catch { return { ok: false, code: 'FORBIDDEN', message: 'CALL_GUEST_DELEGATION_INVALID' }; }
+    if (candidate?.type === 'circlus.native-guest-call.delegation.v1') {
+      const payload = signedRequest.payload;
+      const guest = await verifyNativeGuestCallDelegation(delegation, {
+        vpsId: signedRequest.vpsId!, circleId: signedRequest.circleId!, callSessionId: payload.callSessionId,
+        identityId: payload.identityId!, deviceId: payload.deviceId!, remoteIdentityId: payload.remoteIdentityId,
+        role: payload.role, serverOrigin: payload.serverOrigin!
+      }, this.now() / 1000);
+      if (!guest || guest.kind !== 'temporary' || signedRequest.signerId !== guest.callSigningPublicKey
+          || !verifySignedRequest(signedRequest, { algorithm: 'ed25519', value: guest.callSigningPublicKey })) {
+        return { ok: false, code: 'FORBIDDEN', message: 'CALL_GUEST_DELEGATION_INVALID' };
+      }
+      const device = await temporaryDeviceRepository.findByDeviceId(familyId, guest.deviceId);
+      const identity = await identityRepository.findByIdentityId(familyId, guest.identityId as IdentityId);
+      const chat = [guest.identityId, guest.remoteIdentityId].sort().join('::');
+      if (!device || device.status !== 'active' || !device.can_call || device.expires_at.getTime() < guest.expiresAt * 1000
+          || device.identity_id !== guest.identityId || device.public_key_value !== guest.temporaryIdentityDelegation!.payload.temporaryDevicePublicKey.value
+          || identity?.status !== 'active' || identity.public_key_value !== guest.identityPublicKey
+          || !await temporaryDeviceRepository.hasChatAccess(familyId, guest.deviceId, chat, 'direct')) {
+        return { ok: false, code: 'FORBIDDEN', message: 'CALL_GUEST_ADMISSION_DENIED' };
+      }
+      return { ok: true, familyId, identityId: guest.identityId, device, guest };
+    }
     if (delegation?.payload && delegation?.signature) {
       let claims: any;
       try {
@@ -1069,5 +1129,13 @@ export class WsRegistrationHandlers {
       identityId: device.identity_id,
       device
     };
+  }
+  private async guestIce(ws: WebSocket, familyId: string, callSessionId: string) {
+    if (!this.dependencies.getGuestIce) { this.dependencies.sendError(ws, 'FORBIDDEN', 'SERVER_GUEST_CALL_CONTRACT_REQUIRED'); return null; }
+    return this.dependencies.getGuestIce({ familyId, callSessionId });
+  }
+  private expireGuest(ws: WebSocket, expiresAt: number) {
+    const timeout = setTimeout(() => ws.close(1008, 'CALL_GUEST_EXPIRED'), Math.max(0, expiresAt - this.now()));
+    timeout.unref(); ws.once('close', () => clearTimeout(timeout));
   }
 }

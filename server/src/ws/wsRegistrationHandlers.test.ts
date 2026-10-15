@@ -1,3 +1,4 @@
+import guestVectors from '../../../shared/test-vectors/native-guest-call-v1.json';
 jest.mock('./wsResourceGuard', () => ({ markWebSocketRegistered: jest.fn() }));
 import { markWebSocketRegistered } from './wsResourceGuard';
 jest.mock('../db', () => ({ query: jest.fn() }));
@@ -9,6 +10,7 @@ jest.mock('../db/repositories', () => ({
   identityRepository: { findByIdentityId: jest.fn() },
   temporaryDeviceRepository: {
     findByDeviceIdAnyFamily: jest.fn(),
+    findByDeviceId: jest.fn(), hasChatAccess: jest.fn(),
     terminateAccessAndRotateEpochs: jest.fn()
   }
 }));
@@ -42,7 +44,7 @@ jest.mock('../../../shared/identityId', () => ({
 
 import type { WebSocket } from 'ws';
 import { query } from '../db';
-import { callSessionRepository, identityRepository } from '../db/repositories';
+import { callSessionRepository, identityRepository, temporaryDeviceRepository } from '../db/repositories';
 import { verifyExternalAdmission } from '../services/callAdmissionService';
 import { verifySignature, verifySignedRequest } from '../utils/crypto';
 import { deriveIdentityIdFromPublicKey } from '../../../shared/identityId';
@@ -432,5 +434,54 @@ describe('WebSocket registration handlers', () => {
       },
       timestamp: 1_000
     });
+  });
+});
+
+
+describe('native guest registration authority', () => {
+  beforeEach(() => { jest.clearAllMocks(); jest.useFakeTimers(); process.env.VPS_ID = 'vps-test'; });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+  test.each(guestVectors.cases)('$name keeps explicit scope and rechecks admission', async vector => {
+    const scope = vector.scope;
+    process.env.VPS_ID = scope.vpsId;
+    (deriveIdentityIdFromPublicKey as jest.Mock).mockResolvedValue(scope.identityId);
+    (verifySignedRequest as jest.Mock).mockReturnValue(true);
+    (verifySignature as jest.Mock).mockReturnValue(true);
+    (verifyExternalAdmission as jest.Mock).mockResolvedValue({ ok: true });
+    const claims = JSON.parse(vector.delegation.payload);
+    const temporary = claims.temporaryIdentityDelegation;
+    (temporaryDeviceRepository.findByDeviceId as jest.Mock).mockResolvedValue({
+      family_id: 'family-1', device_id: scope.deviceId, identity_id: scope.identityId, status: 'active', can_call: true,
+      public_key_value: temporary?.payload.temporaryDevicePublicKey.value, expires_at: new Date((claims.expiresAt + 100) * 1000)
+    });
+    (temporaryDeviceRepository.hasChatAccess as jest.Mock).mockResolvedValue(true);
+    (identityRepository.findByIdentityId as jest.Mock).mockResolvedValue({ status: 'active', public_key_value: claims.identityPublicKey });
+    (callSessionRepository.findByCallSessionId as jest.Mock).mockResolvedValue(null);
+    const socket = { once: jest.fn(), close: jest.fn() } as unknown as WebSocket;
+    const { handlers, dependencies } = harness({ getSocketCircleId: () => scope.circleId, now: () => vector.now * 1000,
+      getGuestIce: async () => [] });
+    const request = { type: temporary ? 'call:runtime-register' : 'ws:register-external', signerId: claims.callSigningPublicKey,
+      vpsId: scope.vpsId, circleId: scope.circleId, timestamp: vector.now * 1000, nonce: 'guest-nonce', signature: 'signed',
+      payload: temporary ? { ...scope, mode: 'video-native', callKeyDelegation: vector.delegation }
+        : { ...vector.externalRegistration, nativeGuestDelegation: vector.delegation } } as any;
+    const submit = async (value: any) => temporary ? handlers.handleCallRuntime(socket, { signedRequest: value }) : handlers.handleExternal(socket, value);
+    await submit(request);
+    expect(dependencies.sendError).not.toHaveBeenCalled();
+    expect(dependencies.registerConnection).toHaveBeenCalledWith(socket, expect.objectContaining({
+      identityId: scope.identityId, deviceId: scope.deviceId, scopedCallSessionId: scope.callSessionId,
+      nativeGuestExpiresAt: claims.expiresAt * 1000
+    }), ...(temporary ? [{ trackDevice: true }] : []));
+    expect(dependencies.sendMessage).toHaveBeenCalledWith(socket, expect.objectContaining({ type: 'registered',
+      data: expect.objectContaining({ nativeGuestCallVersion: 1, callSessionId: scope.callSessionId, iceServers: [] }) }));
+    (dependencies.registerConnection as jest.Mock).mockClear();
+    await submit(request);
+    expect(dependencies.sendError).toHaveBeenLastCalledWith(socket, 'INVALID_NONCE', expect.any(String));
+    expect(dependencies.registerConnection).not.toHaveBeenCalled();
+    (dependencies.sendError as jest.Mock).mockClear();
+    if (temporary) (temporaryDeviceRepository.hasChatAccess as jest.Mock).mockResolvedValue(false);
+    else (verifyExternalAdmission as jest.Mock).mockResolvedValue({ ok: false });
+    await submit({ ...request, nonce: 'revoked' });
+    expect(dependencies.sendError).toHaveBeenCalled();
+    expect(dependencies.registerConnection).not.toHaveBeenCalled();
   });
 });

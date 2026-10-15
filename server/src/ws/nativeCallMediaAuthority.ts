@@ -11,9 +11,9 @@ export function nativeCallMediaAuthority(params: {
 }): string | undefined {
   const { ws, info, currentInfo, callSessionId, route, call } = params;
   if (currentInfo !== info) return 'CALL_MEDIA_AUTHORITY_CHANGED';
-  if (info.actorType !== 'local' || info.runtimeMode !== 'video-native') return;
+  if (info.runtimeMode !== 'video-native') return;
   if (!info.scopedCallSessionId || !info.scopedRemoteIdentityId || !info.deviceId || !info.callRuntimeRole) return 'CALL_MEDIA_SCOPE_REQUIRED';
-  if (info.callRuntimePurpose || info.callsEnabled === false || info.scopedCallSessionId !== callSessionId) return 'CALL_MEDIA_SCOPE_MISMATCH';
+  if ((info.actorType === 'local' && (info.callRuntimePurpose || info.callsEnabled === false)) || info.scopedCallSessionId !== callSessionId) return 'CALL_MEDIA_SCOPE_MISMATCH';
   if (!route) return 'CALL_MEDIA_ROUTE_REQUIRED';
   if (route.familyId !== info.familyId || call.participants.length !== 2 || new Set(call.participants).size !== 2
       || !call.participants.includes(info.identityId) || !call.participants.includes(info.scopedRemoteIdentityId)

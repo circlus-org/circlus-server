@@ -13,6 +13,7 @@ export type LocalConnectionInfo = {
   deviceId: DeviceId;
   familyId: string;
   isTemporaryDevice?: boolean;
+  nativeGuestExpiresAt?: number;
   runtimeMode?: 'default' | 'video-native' | 'direct-file-native';
   clientRuntime?: 'web' | 'android_webview' | 'ios_webview';
   /** Authenticated ws:register payload. Absent retains existing client behavior. */
@@ -31,6 +32,11 @@ export type ExternalConnectionInfo = {
   identityId: IdentityId;
   deviceId: DeviceId;
   familyId: string;
+  runtimeMode?: 'video-native';
+  callRuntimeRole?: 'caller';
+  scopedCallSessionId?: CallSessionId;
+  scopedRemoteIdentityId?: IdentityId;
+  nativeGuestExpiresAt?: number;
   externalPublicKey: {
     algorithm: 'ed25519' | 'x25519';
     value: string;
@@ -54,7 +60,7 @@ export type ConnectionInfo = LocalConnectionInfo | ExternalConnectionInfo;
 export function nativeCallScopeFailure(info: ConnectionInfo | undefined, callSessionId: unknown): {
   reason: string; missingFields?: string[];
 } | undefined {
-  if (info?.actorType !== 'local' || info.runtimeMode !== 'video-native') return;
+  if (info?.runtimeMode !== 'video-native') return;
   const missingFields = [
     ...(!info.scopedCallSessionId ? ['scopedCallSessionId'] : []),
     ...(typeof callSessionId !== 'string' || !callSessionId.trim() ? ['callSessionId'] : [])
@@ -74,7 +80,7 @@ export function nativeCallCommandScopeFailure(info: ConnectionInfo | undefined, 
   const callSessionId = callCommandSessionId(type, data);
   const failure = nativeCallScopeFailure(info, callSessionId);
   if (failure) return failure;
-  if (info?.actorType === 'local' && info.runtimeMode === 'video-native'
+  if (info?.runtimeMode === 'video-native'
       && ['call:connected', 'call:heartbeat', 'call:finalized'].includes(type)
       && data?.callSessionId !== undefined && data.callSessionId !== callSessionId) {
     return { reason: 'CALL_RUNTIME_CALL_MISMATCH' };
@@ -82,6 +88,7 @@ export function nativeCallCommandScopeFailure(info: ConnectionInfo | undefined, 
 }
 
 export function isIncomingCallRecipient(info: ConnectionInfo | undefined): boolean {
+  if (info?.nativeGuestExpiresAt !== undefined) return false;
   return Boolean(info && (info.actorType !== 'local' || (info.callsEnabled !== false && info.callRuntimePurpose !== 'terminal')));
 }
 
@@ -122,6 +129,7 @@ export function isMessageAllowedForConnection(
   info: ConnectionInfo | undefined,
   messageType: string
 ): boolean {
+  if (info?.nativeGuestExpiresAt !== undefined && info.nativeGuestExpiresAt <= Date.now()) return false;
   if (info?.actorType === 'local' && info.callsEnabled === false
       && (messageType.startsWith('call:') || messageType === 'register-call-runtime')) return false;
   if (info?.actorType === 'external') {
@@ -142,7 +150,10 @@ export function isMessageAllowedForConnection(
 }
 
 /** Registering the same identity as a member never upgrades its old call socket. */
-export function isOutboundMessageAllowedForConnection(info: ConnectionInfo | undefined, messageType: string): boolean {
+export function isOutboundMessageAllowedForConnection(info: ConnectionInfo | undefined, messageType: string, data?: any): boolean {
+  if (info?.nativeGuestExpiresAt !== undefined && messageType.startsWith('call:')) {
+    if (info.nativeGuestExpiresAt <= Date.now() || !info.scopedCallSessionId || data?.callSessionId !== info.scopedCallSessionId) return false;
+  }
   if (info?.actorType === 'local' && info.callRuntimePurpose === 'terminal') {
     return ['registered', 'pong', 'error', 'call:ended'].includes(messageType);
   }

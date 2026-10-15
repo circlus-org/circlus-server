@@ -106,7 +106,7 @@ export class CallPeerMediaWsHandlers {
         });
       }
 
-      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+      const otherParticipant = info.runtimeMode === 'video-native'
         ? info.scopedRemoteIdentityId
         : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
@@ -125,7 +125,7 @@ export class CallPeerMediaWsHandlers {
           return;
         }
       }
-      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
+      if (info.runtimeMode === 'video-native') return;
       this.dependencies.sendToConnectionSet(
         this.dependencies.getIdentitySockets(info.familyId, otherParticipant),
         {
@@ -189,7 +189,7 @@ export class CallPeerMediaWsHandlers {
       }
 
       if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, 'call.videoState')) return;
-      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+      const otherParticipant = info.runtimeMode === 'video-native'
         ? info.scopedRemoteIdentityId
         : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
@@ -227,7 +227,7 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
-      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
+      if (info.runtimeMode === 'video-native') return;
       const otherSockets = this.dependencies.getIdentitySockets(
         info.familyId,
         otherParticipant
@@ -308,7 +308,7 @@ export class CallPeerMediaWsHandlers {
       if (isTerminalCallState(callSession.state)) return;
       if (!this.authorizeNativeMedia(ws, info, callSessionId, callSession, `call.renegotiate-${kind}`)) return;
       // A native renegotiation requires a selected peer, never identity fanout.
-      if (info.actorType === 'local' && info.runtimeMode === 'video-native'
+      if (info.runtimeMode === 'video-native'
           && !this.dependencies.callSessionRouting.resolvePeerSocket(callSessionId, info.identityId)
           && !this.dependencies.hasDurableSdpPeer?.(info, callSessionId)) {
         this.dependencies.logCallDiag('media_route_rejected', { operation: `call.renegotiate-${kind}`, reason: 'CALL_MEDIA_PEER_REQUIRED' });
@@ -333,7 +333,7 @@ export class CallPeerMediaWsHandlers {
         // Persistence is best-effort for mid-call renegotiation.
       }
 
-      const otherParticipant = info.actorType === 'local' && info.runtimeMode === 'video-native'
+      const otherParticipant = info.runtimeMode === 'video-native'
         ? info.scopedRemoteIdentityId
         : callSession.participants.find((participant: string) => participant !== info.identityId) as IdentityId | undefined;
       if (!otherParticipant) return;
@@ -374,7 +374,7 @@ export class CallPeerMediaWsHandlers {
         return;
       }
 
-      if (info.actorType === 'local' && info.runtimeMode === 'video-native') return;
+      if (info.runtimeMode === 'video-native') return;
       const otherSockets = this.dependencies.getIdentitySockets(
         info.familyId,
         otherParticipant

@@ -81,7 +81,7 @@ export class CallOfferWsHandler {
         return;
       }
       const resolvedTargetIdentityId = rawTargetIdentityId as IdentityId;
-      if (info.actorType === 'local' && info.runtimeMode === 'video-native'
+      if (info.runtimeMode === 'video-native'
           && (info.scopedCallSessionId !== clientCallSessionId || info.scopedRemoteIdentityId !== resolvedTargetIdentityId
             || info.callRuntimeRole !== 'caller')) {
         this.dependencies.logCallDiag('call_offer_route_rejected', {
@@ -276,7 +276,7 @@ export class CallOfferWsHandler {
         familyId,
         initiatorIdentityId: info.identityId,
         initiatorWs: ws,
-        initiatorDeviceId: info.actorType === 'local' ? info.deviceId : undefined,
+        initiatorDeviceId: info.actorType === 'local' || info.runtimeMode === 'video-native' ? info.deviceId : undefined,
         targetIdentityId: resolvedTargetIdentityId
       });
       const targetSockets = await this.resolveEligibleTargetSockets(
