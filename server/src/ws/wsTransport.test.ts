@@ -94,3 +94,25 @@ it('excludes no-call sessions from call delivery and HTTP queueing while preserv
   expect(noCalls.send).toHaveBeenCalledTimes(1);
   expect(queue.queue.map(message => message.type)).toEqual(['message:deliver']);
 });
+
+it('drops late, foreign and incomplete native call broadcasts before both socket send and HTTP queue', () => {
+  const a = socket(), b = socket(), http = socket();
+  const first = { actorType: 'local', familyId: 'circle-a', identityId: 'identity', deviceId: 'device-a', runtimeMode: 'video-native', scopedCallSessionId: 'call-new' } as const;
+  const second = { ...first, familyId: 'circle-b', deviceId: 'device-b', scopedCallSessionId: 'call-other' };
+  const queue = { queue: [] as Array<{ type: string; data: unknown }> };
+  const transport = createWsTransport({ findHttpRuntimeQueue: ws => ws === http ? queue : null, maxHttpRuntimeQueue: 20,
+    canSend: (ws, message) => isOutboundMessageAllowedForConnection(ws === b ? second : first, message.type, message.data) });
+  const recipients = new Set([a, b, http]);
+  for (const type of ['call:ended', 'call:video-state', 'call:delivery-status']) {
+    for (const data of [{ callSessionId: 'call-old' }, {}]) transport.sendToSet(recipients, { type, data });
+  }
+  transport.sendToSet(recipients, { type: 'message:deliver', data: {} });
+  expect(a.send).not.toHaveBeenCalled(); expect(b.send).not.toHaveBeenCalled(); expect(queue.queue).toEqual([]);
+  transport.sendToSet(recipients, { type: 'call:video-state', data: { callSessionId: 'call-new', enabled: true } });
+  transport.sendToSet(recipients, { type: 'call:ended', data: { callSessionId: 'call-other' } });
+  expect(a.send).toHaveBeenCalledTimes(1); expect(b.send).toHaveBeenCalledTimes(1);
+  expect(queue.queue).toEqual([{ type: 'call:video-state', data: { callSessionId: 'call-new', enabled: true } }]);
+  transport.sendToSet(recipients, { type: 'pong', data: {} });
+  expect(a.send).toHaveBeenCalledTimes(2); expect(b.send).toHaveBeenCalledTimes(2);
+  expect(queue.queue).toHaveLength(2);
+});

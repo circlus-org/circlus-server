@@ -149,14 +149,30 @@ export function isMessageAllowedForConnection(
   return true;
 }
 
+export type OutboundCallDiagnostic = { reason: string; missingFields?: string[] };
+
+/** All per-call transports (local, guest, media and terminal) keep their exact
+ * registered call. General identity broadcasts never extend that authority. */
+export function nativeCallOutboundFailure(info: ConnectionInfo | undefined, messageType: string, data?: any): OutboundCallDiagnostic | undefined {
+  const terminal = info?.actorType === 'local' && info.callRuntimePurpose === 'terminal';
+  if (!info || (info.runtimeMode !== 'video-native' && !terminal && info.nativeGuestExpiresAt === undefined)) return;
+  if (['registered', 'pong', 'error'].includes(messageType)) return;
+  if (!messageType.startsWith('call:')) return { reason: 'CALL_RUNTIME_EVENT_NOT_ALLOWED' };
+  if (info.nativeGuestExpiresAt !== undefined && info.nativeGuestExpiresAt <= Date.now()) return { reason: 'CALL_RUNTIME_AUTHORITY_EXPIRED' };
+  const missingFields = [
+    ...(typeof info.scopedCallSessionId !== 'string' || !info.scopedCallSessionId.trim() ? ['scopedCallSessionId'] : []),
+    ...(typeof data?.callSessionId !== 'string' || !data.callSessionId.trim() ? ['callSessionId'] : [])
+  ];
+  if (missingFields.length) return { reason: 'CALL_ROUTE_INCOMPLETE', missingFields };
+  if (info.scopedCallSessionId !== data.callSessionId) return { reason: 'CALL_RUNTIME_CALL_MISMATCH' };
+  if (terminal && messageType !== 'call:ended') return { reason: 'CALL_RUNTIME_EVENT_NOT_ALLOWED' };
+}
+
 /** Registering the same identity as a member never upgrades its old call socket. */
-export function isOutboundMessageAllowedForConnection(info: ConnectionInfo | undefined, messageType: string, data?: any): boolean {
-  if (info?.nativeGuestExpiresAt !== undefined && messageType.startsWith('call:')) {
-    if (info.nativeGuestExpiresAt <= Date.now() || !info.scopedCallSessionId || data?.callSessionId !== info.scopedCallSessionId) return false;
-  }
-  if (info?.actorType === 'local' && info.callRuntimePurpose === 'terminal') {
-    return ['registered', 'pong', 'error', 'call:ended'].includes(messageType);
-  }
+export function isOutboundMessageAllowedForConnection(info: ConnectionInfo | undefined, messageType: string, data?: any,
+  onRejected?: (failure: OutboundCallDiagnostic) => void): boolean {
+  const failure = nativeCallOutboundFailure(info, messageType, data);
+  if (failure) { onRejected?.(failure); return false; }
   if (info?.actorType === 'local' && info.callsEnabled === false && messageType.startsWith('call:')) return false;
   return info?.actorType !== 'external' || messageType.startsWith('call:')
     || ['registered', 'pong', 'error'].includes(messageType);

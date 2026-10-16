@@ -337,12 +337,26 @@ function replayStoredIceCandidates(params: {
 }
 
 let httpCallRuntimeSessionManager: HttpCallRuntimeSessionManager;
+// At most one log per stable rejection reason per connection; no peer payloads.
+const outboundRejections = new WeakMap<WebSocket, Set<string>>();
+function outboundMessageAllowed(ws: WebSocket, message: WebSocketMessage): boolean {
+  return isOutboundMessageAllowedForConnection(connectionRegistry.getInfo(ws), message.type, message.data, failure => {
+    const reasons = outboundRejections.get(ws) || new Set<string>();
+    if (reasons.has(failure.reason)) return;
+    reasons.add(failure.reason); outboundRejections.set(ws, reasons);
+    logger.warn('ws_outbound_call_event_rejected', { operation: 'ws.send', reason: failure.reason,
+      ...(failure.missingFields ? { missingFields: failure.missingFields } : {}) });
+  });
+}
 const wsTransport = createWsTransport({
   findHttpRuntimeQueue: (ws) => httpCallRuntimeSessionManager?.findQueueBySocket(ws) || null,
   maxHttpRuntimeQueue: HTTP_CALL_SIGNALING_MAX_QUEUE,
-  canSend: (ws, message) => isOutboundMessageAllowedForConnection(connectionRegistry.getInfo(ws), message.type, message.data)
+  canSend: outboundMessageAllowed
 });
 function sendMessage(ws: WebSocket, message: WebSocketMessage): void {
+  // Reject before SDP capture/recovery buffering too: a foreign SDP must not
+  // throw inside another call's broadcast or enter its replay mailbox.
+  if (!outboundMessageAllowed(ws, message)) return;
   message = callSdpRecovery.capture(ws, message);
   if (callSdpRecovery.deferSend(() => sendMessage(ws, message))) return;
   if (callSignalingRecovery?.buffer(ws, message)) return;
